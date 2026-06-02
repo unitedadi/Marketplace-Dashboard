@@ -268,7 +268,7 @@ export function MarketplaceDashboard({
 
         <div className="sidebar-account">
           {isSignedIn ? (
-            <UserButton afterSignOutUrl="/sign-in" />
+            <UserButton />
           ) : (
             <div className="avatar" aria-hidden="true">
               {(data.context.account.display_name || accountId)
@@ -1633,7 +1633,7 @@ function AvailabilityView({
       ) : (
         <div className="booking-list" aria-label="Availability">
           {rows.map((row) => (
-            <AvailabilityRow
+            <CollectorAvailabilityRow
               clickable={canUseCalendar}
               key={rowKey(row)}
               onSelect={() => setEditKey(rowKey(row))}
@@ -1655,7 +1655,7 @@ function AvailabilityView({
   );
 }
 
-function AvailabilityRow({
+function CollectorAvailabilityRow({
   clickable,
   row,
   onSelect,
