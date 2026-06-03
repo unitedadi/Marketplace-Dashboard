@@ -1333,6 +1333,57 @@ label {
   text-transform: uppercase;
 }
 
+.modal-address {
+  margin-top: 8px;
+}
+
+.modal-address-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-address-head .modal-section-label {
+  margin: 26px 0 0;
+}
+
+.modal-address-map {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 24px;
+  color: var(--dd-accent);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.modal-address-map:hover {
+  opacity: 0.8;
+}
+
+.modal-address-line {
+  margin-top: 12px;
+  color: var(--dd-text-primary);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.modal-address-sub {
+  margin-top: 3px;
+  color: var(--dd-text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.modal-address-meta {
+  margin-top: 6px;
+  color: var(--dd-text-tertiary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .modal-actions {
   margin-top: 24px;
   border-top: 1px solid var(--dd-divider);

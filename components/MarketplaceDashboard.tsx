@@ -14,6 +14,7 @@ import {
   Droplet,
   FileUp,
   Loader2,
+  MapPin,
   Plus,
   RefreshCw,
   Search,
@@ -700,6 +701,31 @@ function BookingDetail({
   const canAssign = canAssignNurses && perms.can_assign_nurse === true;
   const canComplete = perms.can_mark_complete === true;
 
+  const address = (booking.address ?? {}) as Record<string, unknown>;
+  const addr = (key: string): string | null => {
+    const value = address[key];
+    if (typeof value === "string") return value.trim() || null;
+    if (typeof value === "number") return String(value);
+    return null;
+  };
+  const addrLine1 = addr("line1");
+  const addrLine2 = addr("line2");
+  const addrMeta = [
+    addr("building_name"),
+    addr("floor_number") ? `Floor ${addr("floor_number")}` : null,
+    addr("area"),
+    addr("city"),
+    addr("emirate"),
+    addr("country"),
+  ].filter(Boolean) as string[];
+  const addrLat = addr("latitude");
+  const addrLng = addr("longitude");
+  const mapsUrl =
+    addrLat && addrLng
+      ? `https://www.google.com/maps/search/?api=1&query=${addrLat},${addrLng}`
+      : null;
+  const hasAddress = Boolean(addrLine1 || addrMeta.length);
+
   async function handleAcknowledge() {
     setIsAcknowledging(true);
     setAckError(null);
@@ -864,6 +890,23 @@ function BookingDetail({
               </button>
             </div>
           )
+        ) : null}
+
+        {hasAddress ? (
+          <div className="modal-address">
+            <div className="modal-address-head">
+              <div className="modal-section-label">Address</div>
+              {mapsUrl ? (
+                <a className="modal-address-map" href={mapsUrl} rel="noopener noreferrer" target="_blank">
+                  <MapPin size={13} />
+                  Open in Maps
+                </a>
+              ) : null}
+            </div>
+            {addrLine1 ? <div className="modal-address-line">{addrLine1}</div> : null}
+            {addrLine2 ? <div className="modal-address-sub">{addrLine2}</div> : null}
+            {addrMeta.length ? <div className="modal-address-meta">{addrMeta.join(" · ")}</div> : null}
+          </div>
         ) : null}
 
         <div className="modal-section-label">
