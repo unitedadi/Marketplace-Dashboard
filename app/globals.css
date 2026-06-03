@@ -1384,6 +1384,30 @@ label {
   line-height: 1.4;
 }
 
+.map-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  min-height: 34px;
+  border: 1px solid var(--dd-divider);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dd-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0 14px;
+  transition:
+    background var(--dd-snappy),
+    border-color var(--dd-snappy);
+}
+
+.map-copy-button:hover {
+  background: var(--dd-fill-subtle);
+  border-color: rgba(23, 59, 61, 0.16);
+}
+
 .modal-actions {
   margin-top: 24px;
   border-top: 1px solid var(--dd-divider);

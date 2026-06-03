@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Copy,
   Download,
   Droplet,
   FileUp,
@@ -657,6 +658,33 @@ function BookingListRow({
   );
 }
 
+function MapCopyButton({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Fallback for browsers without the async clipboard API.
+      const input = document.createElement("textarea");
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }
+
+  return (
+    <button className="map-copy-button" onClick={copy} type="button">
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+      {copied ? "Copied" : "Copy location link"}
+    </button>
+  );
+}
+
 function BookingDetail({
   accountId,
   actorEmail,
@@ -906,6 +934,7 @@ function BookingDetail({
             {addrLine1 ? <div className="modal-address-line">{addrLine1}</div> : null}
             {addrLine2 ? <div className="modal-address-sub">{addrLine2}</div> : null}
             {addrMeta.length ? <div className="modal-address-meta">{addrMeta.join(" · ")}</div> : null}
+            {mapsUrl ? <MapCopyButton url={mapsUrl} /> : null}
           </div>
         ) : null}
 
