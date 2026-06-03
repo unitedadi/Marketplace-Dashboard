@@ -99,6 +99,15 @@ button {
   line-height: 1.5;
 }
 
+.bootstrap-spinner {
+  align-items: center;
+  background: var(--dd-bg);
+  color: var(--dd-accent);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+}
+
 .chooser-list {
   display: flex;
   flex-direction: column;

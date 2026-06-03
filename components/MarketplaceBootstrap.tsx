@@ -1,6 +1,7 @@
 "use client";
 
 import { useUser } from "@clerk/nextjs";
+import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { MarketplaceDashboard } from "@/components/MarketplaceDashboard";
 import {
@@ -81,6 +82,7 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
   const { isLoaded, isSignedIn, user } = useUser();
   const [selectedAccountId, setSelectedAccountId] = useState(accountId ?? null);
   const [accounts, setAccounts] = useState<MarketplaceAccount[]>([]);
+  const [accountsResolved, setAccountsResolved] = useState(Boolean(accountId));
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const email = useMemo(() => user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? null, [user]);
@@ -88,20 +90,26 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
   useEffect(() => {
     if (accountId) {
       setSelectedAccountId(accountId);
+      setAccountsResolved(true);
       return;
     }
     if (!isLoaded || !isSignedIn || !email) return;
 
     let cancelled = false;
+    setAccountsResolved(false);
     setError(null);
     resolveAccounts(email)
       .then((items) => {
         if (cancelled) return;
         setAccounts(items);
+        setAccountsResolved(true);
         if (items.length === 1) setSelectedAccountId(items[0].account_id);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not resolve marketplace account.");
+        if (!cancelled) {
+          setAccountsResolved(true);
+          setError(err instanceof Error ? err.message : "Could not resolve marketplace account.");
+        }
       });
     return () => {
       cancelled = true;
@@ -128,7 +136,7 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
     };
   }, [selectedAccountId]);
 
-  if (!isLoaded) return <StatusCard title="Loading" body="Preparing marketplace dashboard..." />;
+  if (!isLoaded) return <SpinnerOnly />;
 
   if (!isSignedIn && !accountId) {
     return (
@@ -140,6 +148,8 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
       />
     );
   }
+
+  if (!accountId && isSignedIn && !accountsResolved) return <SpinnerOnly />;
 
   if (!selectedAccountId && accounts.length > 1) {
     return (
@@ -165,14 +175,22 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
     return (
       <StatusCard
         title="No marketplace account"
-        body={email ? `${email} is not linked to a marketplace account yet.` : "This login is not linked to a marketplace account yet."}
+        body={error ?? (email ? `${email} is not linked to a marketplace account yet.` : "This login is not linked to a marketplace account yet.")}
       />
     );
   }
 
-  if (!data) return <StatusCard title="Loading" body={`Loading ${selectedAccountId}...`} />;
+  if (!data) return <SpinnerOnly />;
 
   return <MarketplaceDashboard initialData={data} initialView={initialView} key={selectedAccountId} />;
+}
+
+function SpinnerOnly() {
+  return (
+    <div className="bootstrap-spinner" aria-busy="true" aria-live="polite">
+      <Loader2 className="spin" size={28} />
+    </div>
+  );
 }
 
 function StatusCard({
