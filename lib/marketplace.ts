@@ -288,12 +288,12 @@ export async function loadDashboardData(
     marketplaceFetch<BookingsResponse>("/marketplace/bookings?limit=100&view=completed", accountId).catch(
       () => emptyBookings,
     ),
-    marketplaceFetch<DashboardData["ledger"]>("/marketplace/ledger?limit=100", accountId).catch(() => ({
+    marketplaceFetch<DashboardData["ledger"]>("/marketplace/ledger?limit=500", accountId).catch(() => ({
       account: context.account,
       totals: {},
       total_amount_fils: 0,
       items: [],
-      limit: 100,
+      limit: 500,
     })),
     caps.nurses
       ? marketplaceFetch<DashboardData["nurses"]>("/marketplace/nurses", accountId).catch(() => ({

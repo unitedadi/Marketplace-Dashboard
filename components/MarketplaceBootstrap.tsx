@@ -42,12 +42,12 @@ async function loadDashboard(accountId: string): Promise<DashboardData> {
   const [bookingsNew, bookingsCompleted, ledger, nurses, availability] = await Promise.all([
     proxyJson<BookingsResponse>("bookings?limit=100&view=new", accountId).catch(() => emptyBookings),
     proxyJson<BookingsResponse>("bookings?limit=100&view=completed", accountId).catch(() => emptyBookings),
-    proxyJson<DashboardData["ledger"]>("ledger?limit=100", accountId).catch(() => ({
+    proxyJson<DashboardData["ledger"]>("ledger?limit=500", accountId).catch(() => ({
       account: context.account,
       totals: {},
       total_amount_fils: 0,
       items: [],
-      limit: 100,
+      limit: 500,
     })),
     caps.nurses
       ? proxyJson<DashboardData["nurses"]>("nurses", accountId).catch(() => ({

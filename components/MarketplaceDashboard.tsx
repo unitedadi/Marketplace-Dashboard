@@ -206,7 +206,7 @@ export function MarketplaceDashboard({
           proxyJson<DashboardData["context"]>("context", accountId),
           proxyJson<BookingsResponse>("bookings?limit=100&view=new", accountId),
           proxyJson<BookingsResponse>("bookings?limit=100&view=completed", accountId),
-          proxyJson<DashboardData["ledger"]>("ledger?limit=100", accountId),
+          proxyJson<DashboardData["ledger"]>("ledger?limit=500", accountId),
           caps.nurses
             ? proxyJson<DashboardData["nurses"]>("nurses", accountId)
             : Promise.resolve(data.nurses),
@@ -1216,18 +1216,21 @@ function exportLedgerCsv(entries: LedgerEntry[], fileLabel: string) {
   URL.revokeObjectURL(url);
 }
 
-type RevenuePeriod = "last" | "current";
+type RevenuePeriod = "all" | "last" | "current";
 
 function RevenueView({ accountName, entries }: { accountName: string; entries: LedgerEntry[] }) {
-  const [period, setPeriod] = useState<RevenuePeriod>("current");
+  const [period, setPeriod] = useState<RevenuePeriod>("all");
   const [query, setQuery] = useState("");
 
   // NOTE: month split is client-side for now; swap to the period APIs when provided.
   const currentMonth = currentDubaiMonthIndex();
   const targetMonth = period === "current" ? currentMonth : currentMonth - 1;
-  const inPeriod = entries.filter((entry) => dubaiMonthIndex(entry.occurred_at) === targetMonth);
+  const inPeriod =
+    period === "all" ? entries : entries.filter((entry) => dubaiMonthIndex(entry.occurred_at) === targetMonth);
   const visible = inPeriod.filter((entry) => ledgerMatchesQuery(entry, query));
   const hasQuery = query.trim().length > 0;
+  const periodLabel =
+    period === "all" ? "all revenue" : period === "current" ? "the current month" : "last month";
 
   const periodTotal = inPeriod.reduce((sum, entry) => sum + (entry.amount_fils || 0), 0);
   const stats = [
@@ -1241,6 +1244,7 @@ function RevenueView({ accountName, entries }: { accountName: string; entries: L
         <SegmentPicker
           onChange={setPeriod}
           options={[
+            { label: "All", value: "all" },
             { label: "Last month", value: "last" },
             { label: "Current month", value: "current" },
           ]}
@@ -1257,7 +1261,7 @@ function RevenueView({ accountName, entries }: { accountName: string; entries: L
           onClick={() =>
             exportLedgerCsv(
               inPeriod,
-              `revenue-${accountName.replace(/\s+/g, "-").toLowerCase()}-${period === "current" ? "current-month" : "last-month"}`,
+              `revenue-${accountName.replace(/\s+/g, "-").toLowerCase()}-${period === "all" ? "all" : period === "current" ? "current-month" : "last-month"}`,
             )
           }
           type="button"
@@ -1272,9 +1276,17 @@ function RevenueView({ accountName, entries }: { accountName: string; entries: L
           body={
             hasQuery
               ? `No entries match “${query.trim()}”. Try a different term.`
-              : `${accountName} has no ledger entries for ${period === "current" ? "the current month" : "last month"}.`
+              : `${accountName} has no ledger entries for ${periodLabel}.`
           }
-          title={hasQuery ? "No matches" : period === "current" ? "No revenue this month" : "No revenue last month"}
+          title={
+            hasQuery
+              ? "No matches"
+              : period === "all"
+                ? "No revenue yet"
+                : period === "current"
+                  ? "No revenue this month"
+                  : "No revenue last month"
+          }
         />
       ) : (
         <div className="booking-list" aria-label="Ledger entries">
