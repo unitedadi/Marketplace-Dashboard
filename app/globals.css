@@ -1277,6 +1277,25 @@ label {
   line-height: 1.4;
 }
 
+.modal-call {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: var(--dd-accent);
+  color: var(--dd-on-dark-1);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 9px 15px;
+  transition: opacity var(--dd-snappy);
+}
+
+.modal-call:hover {
+  opacity: 0.9;
+}
+
 .modal-close {
   display: inline-flex;
   align-items: center;

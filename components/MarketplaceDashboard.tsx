@@ -16,6 +16,7 @@ import {
   FileUp,
   Loader2,
   MapPin,
+  Phone,
   Plus,
   RefreshCw,
   Search,
@@ -818,6 +819,12 @@ function BookingDetail({
             <p>
               {booking.order_id} · Booking #{booking.booking_id} · {formatDateTime(booking.schedule.start_at)}
             </p>
+            {booking.customer.phone ? (
+              <a className="modal-call" href={`tel:${booking.customer.phone}`}>
+                <Phone size={14} />
+                {booking.customer.phone}
+              </a>
+            ) : null}
           </div>
           <button aria-label="Close" className="modal-close" onClick={onClose} type="button">
             <X size={18} />
