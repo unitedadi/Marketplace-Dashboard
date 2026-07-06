@@ -198,6 +198,67 @@ export type DashboardData = {
   };
 };
 
+function summarizeBookingItems(booking: MarketplaceBooking) {
+  const items = booking.members.flatMap((member) => member.items);
+  const amountFils = items.reduce((sum, item) => sum + Number(item.price_fils || 0), 0);
+  const names = Array.from(new Set(items.map((item) => item.name).filter(Boolean)));
+  return {
+    amountFils,
+    productId: items[0]?.product_id ?? null,
+    productName:
+      names.length > 1
+        ? `${names[0]} +${names.length - 1}`
+        : names[0] ?? null,
+  };
+}
+
+function bookingLedgerEntryId(booking: MarketplaceBooking) {
+  return -Math.abs(Number(booking.booking_id || 0));
+}
+
+export function ledgerWithCompletedBookingFallback(
+  ledger: DashboardData["ledger"],
+  completedBookings: MarketplaceBooking[],
+): DashboardData["ledger"] {
+  if (ledger.items.length > 0) return ledger;
+
+  const items: LedgerEntry[] = completedBookings
+    .map<LedgerEntry | null>((booking) => {
+      const summary = summarizeBookingItems(booking);
+      if (summary.amountFils === 0) return null;
+      const partyId = booking.partner.party_id ?? booking.collector.party_id ?? "";
+      const partyName = booking.partner.name ?? booking.collector.name ?? "";
+      const partyRole = booking.partner.party_id ? "PARTNER" : booking.collector.party_id ? "COLLECTOR" : "";
+
+      return {
+        ledger_entry_id: bookingLedgerEntryId(booking),
+        party_id: partyId,
+        party_name: partyName,
+        party_role: partyRole,
+        order_id: booking.order_id,
+        booking_id: booking.booking_id,
+        order_item_id: null,
+        vertical_id: booking.vertical_id,
+        product_id: summary.productId,
+        product_name: summary.productName,
+        entry_type: "BOOKING_TOTAL",
+        amount_fils: summary.amountFils,
+        occurred_at: booking.schedule.start_at ?? booking.updated_at ?? booking.created_at,
+        customer_name: booking.customer.name,
+        booking_status: booking.status,
+      } satisfies LedgerEntry;
+    })
+    .filter((entry): entry is LedgerEntry => entry !== null);
+
+  const totalAmountFils = items.reduce((sum, item) => sum + item.amount_fils, 0);
+  return {
+    ...ledger,
+    totals: totalAmountFils > 0 ? { BOOKING_TOTAL: totalAmountFils } : ledger.totals,
+    total_amount_fils: totalAmountFils,
+    items,
+  };
+}
+
 export function marketplaceUrl(path: string, accountId: string = MARKETPLACE_ACCOUNT_ID) {
   const url = new URL(path, MARKETPLACE_API_BASE);
   url.searchParams.set("account_id", accountId);

@@ -1,6 +1,6 @@
 "use client";
 
-import { UserButton, useUser } from "@clerk/nextjs";
+import { UserButton } from "@clerk/nextjs";
 import {
   Banknote,
   Bell,
@@ -38,6 +38,7 @@ import {
   Ingredient,
   isAddonItem,
   ItemBiomarkers,
+  ledgerWithCompletedBookingFallback,
   LedgerEntry,
   MarketplaceBooking,
   MarketplaceNurse,
@@ -161,11 +162,12 @@ function isViewId(value: string | undefined): value is ViewId {
 export function MarketplaceDashboard({
   initialData,
   initialView,
+  showUserButton = false,
 }: {
   initialData: DashboardData;
   initialView?: string;
+  showUserButton?: boolean;
 }) {
-  const { isSignedIn } = useUser();
   const [view, setViewState] = useState<ViewId>(isViewId(initialView) ? initialView : "bookings");
 
   function setView(next: ViewId) {
@@ -226,7 +228,7 @@ export function MarketplaceDashboard({
           new: bookingsNew.items,
         },
         context,
-        ledger,
+        ledger: ledgerWithCompletedBookingFallback(ledger, bookingsCompleted.items),
         nurses,
       });
     } catch (error) {
@@ -270,7 +272,7 @@ export function MarketplaceDashboard({
         </nav>
 
         <div className="sidebar-account">
-          {isSignedIn ? (
+          {showUserButton ? (
             <UserButton />
           ) : (
             <div className="avatar" aria-hidden="true">

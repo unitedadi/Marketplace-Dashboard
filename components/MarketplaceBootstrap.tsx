@@ -1,6 +1,6 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
+import { ClerkProvider, useUser } from "@clerk/nextjs";
 import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { MarketplaceDashboard } from "@/components/MarketplaceDashboard";
@@ -8,6 +8,7 @@ import {
   BookingsResponse,
   DashboardData,
   emptyDashboardData,
+  ledgerWithCompletedBookingFallback,
   MarketplaceAccount,
 } from "@/lib/marketplace";
 
@@ -72,27 +73,59 @@ async function loadDashboard(accountId: string): Promise<DashboardData> {
       new: bookingsNew.items,
       completed: bookingsCompleted.items,
     },
-    ledger,
+    ledger: ledgerWithCompletedBookingFallback(ledger, bookingsCompleted.items),
     nurses,
     availability,
   };
 }
 
 export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps) {
+  if (accountId) return <AccountDashboard accountId={accountId} initialView={initialView} />;
+  return <AuthenticatedMarketplaceBootstrap initialView={initialView} />;
+}
+
+function AccountDashboard({ accountId, initialView }: { accountId: string; initialView?: string }) {
+  const [data, setData] = useState<DashboardData | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null);
+    loadDashboard(accountId)
+      .then((next) => {
+        if (!cancelled) setData(next);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Failed to load marketplace dashboard.";
+        setData(emptyDashboardData(message, accountId));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId]);
+
+  if (!data) return <SpinnerOnly />;
+  return <MarketplaceDashboard initialData={data} initialView={initialView} showUserButton={false} />;
+}
+
+function AuthenticatedMarketplaceBootstrap({ initialView }: Pick<BootstrapProps, "initialView">) {
+  return (
+    <ClerkProvider afterSignOutUrl="/sign-in">
+      <AuthenticatedMarketplaceBootstrapInner initialView={initialView} />
+    </ClerkProvider>
+  );
+}
+
+function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapProps, "initialView">) {
   const { isLoaded, isSignedIn, user } = useUser();
-  const [selectedAccountId, setSelectedAccountId] = useState(accountId ?? null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<MarketplaceAccount[]>([]);
-  const [accountsResolved, setAccountsResolved] = useState(Boolean(accountId));
+  const [accountsResolved, setAccountsResolved] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const email = useMemo(() => user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? null, [user]);
 
   useEffect(() => {
-    if (accountId) {
-      setSelectedAccountId(accountId);
-      setAccountsResolved(true);
-      return;
-    }
     if (!isLoaded || !isSignedIn || !email) return;
 
     let cancelled = false;
@@ -114,7 +147,7 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
     return () => {
       cancelled = true;
     };
-  }, [accountId, email, isLoaded, isSignedIn]);
+  }, [email, isLoaded, isSignedIn]);
 
   useEffect(() => {
     if (!selectedAccountId) return;
@@ -138,7 +171,7 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
 
   if (!isLoaded) return <SpinnerOnly />;
 
-  if (!isSignedIn && !accountId) {
+  if (!isSignedIn) {
     return (
       <StatusCard
         title="Sign in"
@@ -149,7 +182,7 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
     );
   }
 
-  if (!accountId && isSignedIn && !accountsResolved) return <SpinnerOnly />;
+  if (isSignedIn && !accountsResolved) return <SpinnerOnly />;
 
   if (!selectedAccountId && accounts.length > 1) {
     return (
@@ -182,7 +215,7 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
 
   if (!data) return <SpinnerOnly />;
 
-  return <MarketplaceDashboard initialData={data} initialView={initialView} key={selectedAccountId} />;
+  return <MarketplaceDashboard initialData={data} initialView={initialView} key={selectedAccountId} showUserButton />;
 }
 
 function SpinnerOnly() {
