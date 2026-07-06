@@ -200,7 +200,7 @@ export type DashboardData = {
 
 function summarizeBookingItems(booking: MarketplaceBooking) {
   const items = booking.members.flatMap((member) => member.items);
-  const amountFils = items.reduce((sum, item) => sum + Number(item.price_fils || 0), 0);
+  const amountFils = items.reduce((sum, item) => sum + bookingItemPriceFils(item), 0);
   const names = Array.from(new Set(items.map((item) => item.name).filter(Boolean)));
   return {
     amountFils,
@@ -210,6 +210,33 @@ function summarizeBookingItems(booking: MarketplaceBooking) {
         ? `${names[0]} +${names.length - 1}`
         : names[0] ?? null,
   };
+}
+
+function getRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function positiveFils(value: unknown) {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function bookingItemPriceFils(item: BookingMember["items"][number]) {
+  const directPrice = positiveFils(item.price_fils);
+  if (directPrice > 0) return directPrice;
+
+  const attributes = getRecord(item.attributes);
+  const iv = getRecord(attributes.IV);
+  const pricing = getRecord(iv.pricing ?? attributes.pricing);
+  const selected = typeof pricing.selected === "string" ? pricing.selected : "";
+  const selectedPrice = positiveFils(pricing[`${selected}_fils`]);
+  if (selectedPrice > 0) return selectedPrice;
+
+  for (const key of ["auh_fils", "dxb_fils", "price_fils", "amount_fils"]) {
+    const amount = positiveFils(pricing[key]);
+    if (amount > 0) return amount;
+  }
+  return 0;
 }
 
 function bookingLedgerEntryId(booking: MarketplaceBooking) {
