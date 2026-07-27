@@ -8,7 +8,6 @@ import {
   BookingsResponse,
   DashboardData,
   emptyDashboardData,
-  ledgerWithCompletedBookingFallback,
   MarketplaceAccount,
 } from "@/lib/marketplace";
 
@@ -73,7 +72,7 @@ async function loadDashboard(accountId: string): Promise<DashboardData> {
       new: bookingsNew.items,
       completed: bookingsCompleted.items,
     },
-    ledger: ledgerWithCompletedBookingFallback(ledger, bookingsCompleted.items),
+    ledger,
     nurses,
     availability,
   };

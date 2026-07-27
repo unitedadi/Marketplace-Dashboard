@@ -38,7 +38,6 @@ import {
   Ingredient,
   isAddonItem,
   ItemBiomarkers,
-  ledgerWithCompletedBookingFallback,
   LedgerEntry,
   MarketplaceBooking,
   MarketplaceNurse,
@@ -228,7 +227,7 @@ export function MarketplaceDashboard({
           new: bookingsNew.items,
         },
         context,
-        ledger: ledgerWithCompletedBookingFallback(ledger, bookingsCompleted.items),
+        ledger,
         nurses,
       });
     } catch (error) {
