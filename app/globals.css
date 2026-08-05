@@ -743,6 +743,101 @@ button:disabled {
   letter-spacing: 0;
 }
 
+.schedule-section {
+  border-top: 1px solid var(--dd-divider);
+  margin-top: 14px;
+  padding-top: 16px;
+}
+
+.schedule-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.weekday-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.weekday-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 32px;
+  border: 1px solid var(--dd-divider);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dd-text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  transition:
+    background var(--dd-snappy),
+    border-color var(--dd-snappy),
+    color var(--dd-snappy);
+}
+
+.weekday-toggle.active {
+  border-color: var(--dd-accent);
+  background: var(--dd-accent);
+  color: var(--dd-on-dark-1);
+}
+
+.inline-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--dd-accent);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.break-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.break-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  color: var(--dd-text-tertiary);
+  font-size: 12px;
+}
+
+.break-row select {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--dd-divider);
+  border-radius: 999px;
+  background: var(--dd-bg);
+  color: var(--dd-text-primary);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.break-remove {
+  width: 30px;
+  height: 30px;
+}
+
+.schedule-hint {
+  margin-top: 9px;
+  color: var(--dd-text-tertiary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .list-header {
   display: flex;
   align-items: center;

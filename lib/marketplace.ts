@@ -134,13 +134,38 @@ export type LedgerEntry = {
   booking_status: string | null;
 };
 
+export type NurseAvailabilityBreak = {
+  nurse_schedule_break_id?: number;
+  start_minute: number;
+  end_minute: number;
+  status: string;
+};
+
+export type NurseAvailability = {
+  nurse_schedule_id?: number;
+  vertical_id: string;
+  emirate: string;
+  priority: number;
+  start_minute: number;
+  end_minute: number;
+  slot_interval_minutes: number;
+  busy_buffer_minutes: number;
+  service_area_norms: string[];
+  off_days: string[];
+  status: string;
+  breaks: NurseAvailabilityBreak[];
+};
+
 export type MarketplaceNurse = {
   nurse_id: string;
   display_name: string;
   phone_number: string | null;
+  email?: string | null;
   gender: string | null;
   licence_number: string | null;
+  party_ids?: string[];
   status: string;
+  availability?: NurseAvailability[];
   metadata?: Record<string, unknown>;
   created_at: string | null;
   updated_at: string | null;

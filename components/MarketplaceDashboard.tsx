@@ -7,7 +7,6 @@ import {
   CalendarCheck2,
   Check,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   Clock3,
   Copy,
@@ -26,7 +25,6 @@ import {
 } from "lucide-react";
 import { ChangeEvent, FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AvailabilityRow,
   BiomarkerGroup,
   BookingMember,
   BookingsResponse,
@@ -42,6 +40,7 @@ import {
   MarketplaceBooking,
   MarketplaceNurse,
   MarketplaceParty,
+  NurseAvailability,
 } from "@/lib/marketplace";
 
 type ViewId = "bookings" | "revenue" | "nurses" | "availability" | "notifications" | "team";
@@ -97,6 +96,12 @@ function friendlyAckError(error: unknown) {
   const raw = error instanceof Error ? error.message : "";
   if (raw.includes("marketplace_mutations_disabled")) {
     return "Write actions are disabled on this API runtime.";
+  }
+  if (raw.includes("nurse_scheduling_not_enabled")) {
+    return "Nurse scheduling is not enabled for this booking provider. Set nurse availability for this account before assigning.";
+  }
+  if (raw.includes("nurse_schedule_conflict") || raw.includes("nurse_not_available")) {
+    return "This nurse is not available for the booking time. Update the nurse schedule, emirate, off-days, breaks, or service area.";
   }
   return raw || "Could not acknowledge. Please try again.";
 }
@@ -187,7 +192,6 @@ export function MarketplaceDashboard({
   const capabilities = data.context.capabilities ?? {};
   const canManageNurses = capabilities.nurses === true;
   const canAssignNurses = capabilities.nurse_assignment === true;
-  const canAvailabilityCalendar = capabilities.availability_calendar === true;
   const canWhatsapp = capabilities.whatsapp_notifications === true;
   const visibleNavItems = navItems.filter((item) => {
     if (item.id === "nurses") return canManageNurses;
@@ -319,7 +323,7 @@ export function MarketplaceDashboard({
           ) : null}
           {safeView === "revenue" ? <RevenueView accountName={accountName} entries={data.ledger.items} /> : null}
           {safeView === "nurses" ? <NursesView accountId={accountId} data={data} onChanged={refresh} /> : null}
-          {safeView === "availability" ? <AvailabilityView accountId={accountId} canUseCalendar={canAvailabilityCalendar} rows={data.availability.items} onChanged={refresh} /> : null}
+          {safeView === "availability" ? <AvailabilityView accountId={accountId} nurses={data.nurses.items} onChanged={refresh} /> : null}
           {safeView === "notifications" ? <NotificationsView accountId={accountId} parties={data.context.parties} /> : null}
           {safeView === "team" ? <TeamView accountId={accountId} currentEmail={data.context.account.owner_email} /> : null}
         </section>
@@ -1699,90 +1703,87 @@ function minutesToLabel(minutes: number): string {
 
 function AvailabilityView({
   accountId,
-  canUseCalendar,
-  rows,
+  nurses,
   onChanged,
 }: {
   accountId: string;
-  canUseCalendar: boolean;
-  rows: AvailabilityRow[];
+  nurses: MarketplaceNurse[];
   onChanged: () => Promise<void>;
 }) {
-  const [editKey, setEditKey] = useState<string | null>(null);
-  const rowKey = (row: AvailabilityRow) => `${row.collector_id}-${row.vertical_id}`;
-  const editRow = rows.find((row) => rowKey(row) === editKey) ?? null;
+  const [editNurseId, setEditNurseId] = useState<string | null>(null);
+  const editNurse = nurses.find((nurse) => nurse.nurse_id === editNurseId) ?? null;
 
   return (
     <div className="view-stack">
       <div className="list-toolbar">
         <div className="list-header">
-          <span className="list-header-label">Availability</span>
-          <span className="list-header-count">{rows.length}</span>
+          <span className="list-header-label">Nurse availability</span>
+          <span className="list-header-count">{nurses.length}</span>
         </div>
       </div>
 
-      {rows.length === 0 ? (
-        <EmptyState title="No availability yet" body="No collector working hours were returned for this marketplace account." />
+      {nurses.length === 0 ? (
+        <EmptyState title="No nurses yet" body="Add nurses first, then set availability for each nurse." />
       ) : (
         <div className="booking-list" aria-label="Availability">
-          {rows.map((row) => (
-            <CollectorAvailabilityRow
-              clickable={canUseCalendar}
-              key={rowKey(row)}
-              onSelect={() => setEditKey(rowKey(row))}
-              row={row}
+          {nurses.map((nurse) => (
+            <NurseAvailabilityRow
+              key={nurse.nurse_id}
+              nurse={nurse}
+              onSelect={() => setEditNurseId(nurse.nurse_id)}
             />
           ))}
         </div>
       )}
 
-      {canUseCalendar && editRow ? (
-        <AvailabilityEditModal
+      {editNurse ? (
+        <NurseAvailabilityModal
           accountId={accountId}
-          onClose={() => setEditKey(null)}
+          nurse={editNurse}
+          onClose={() => setEditNurseId(null)}
           onSaved={onChanged}
-          row={editRow}
         />
       ) : null}
     </div>
   );
 }
 
-function CollectorAvailabilityRow({
-  clickable,
-  row,
+function NurseAvailabilityRow({
+  nurse,
   onSelect,
 }: {
-  clickable: boolean;
-  row: AvailabilityRow;
+  nurse: MarketplaceNurse;
   onSelect: () => void;
 }) {
-  const meta = [row.vertical_id?.toUpperCase(), row.emirate].filter(Boolean) as string[];
+  const schedules = nurse.availability ?? [];
+  const activeSchedules = schedules.filter((schedule) => (schedule.status ?? "").toUpperCase() === "ACTIVE");
+  const meta = activeSchedules.length
+    ? activeSchedules.slice(0, 3).map((schedule) => (
+        `${schedule.vertical_id.toUpperCase()} · ${schedule.emirate} · ${minutesToLabel(schedule.start_minute)}-${minutesToLabel(schedule.end_minute)}`
+      ))
+    : ["No active nurse schedule"];
+  const subtitle = [nurse.phone_number, nurse.licence_number ? `Licence ${nurse.licence_number}` : null]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div
-      className={clickable ? "booking-row" : "booking-row static"}
-      onClick={clickable ? onSelect : undefined}
-      onKeyDown={
-        clickable
-          ? (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onSelect();
-              }
-            }
-          : undefined
-      }
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
+      className="booking-row"
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      role="button"
+      tabIndex={0}
     >
       <div className="booking-row-copy">
         <div className="booking-row-titleline">
-          <span className="booking-row-title">{row.collector_name}</span>
+          <span className="booking-row-title">{nurse.display_name}</span>
         </div>
-        <div className="booking-row-subtitle">
-          {minutesToLabel(row.start_minute)} – {minutesToLabel(row.end_minute)}
-        </div>
+        {subtitle ? <div className="booking-row-subtitle">{subtitle}</div> : null}
         <div className="booking-row-meta">
           {meta.map((item, index) => (
             <span className="booking-meta-item" key={`${item}-${index}`}>
@@ -1793,281 +1794,140 @@ function CollectorAvailabilityRow({
         </div>
       </div>
       <div className="booking-row-side">
-        <span className={`status-pill ${statusClass(row.status)}`}>{formatStage(row.status)}</span>
+        <span className={`status-pill ${activeSchedules.length ? "good" : "neutral"}`}>
+          {activeSchedules.length ? `${activeSchedules.length} schedule${activeSchedules.length === 1 ? "" : "s"}` : "Needs schedule"}
+        </span>
       </div>
-      {clickable ? (
-        <ChevronRight aria-hidden="true" className="booking-row-chevron" size={18} strokeWidth={1.6} />
-      ) : null}
+      <ChevronRight aria-hidden="true" className="booking-row-chevron" size={18} strokeWidth={1.6} />
     </div>
   );
 }
 
-const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH_LABELS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+const NURSE_WEEKDAYS = [
+  { label: "Sun", value: "SUNDAY" },
+  { label: "Mon", value: "MONDAY" },
+  { label: "Tue", value: "TUESDAY" },
+  { label: "Wed", value: "WEDNESDAY" },
+  { label: "Thu", value: "THURSDAY" },
+  { label: "Fri", value: "FRIDAY" },
+  { label: "Sat", value: "SATURDAY" },
 ];
-const SLOTS_PER_DAY = 48; // 30-minute slots across 24h
 
-function dayKey(year: number, month: number, day: number): string {
-  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
+const EMIRATE_OPTIONS = [
+  { label: "Abu Dhabi", value: "AUH" },
+  { label: "Dubai", value: "DXB" },
+  { label: "Al Ain", value: "AL_AIN" },
+  { label: "Sharjah", value: "SHJ" },
+];
 
-function slotLabel(index: number): string {
-  return minutesToLabel(index * 30);
-}
+const VERTICAL_OPTIONS = [
+  { label: "Laboratory", value: "laboratory" },
+  { label: "IV Drips", value: "iv-drips" },
+];
 
-function setsEqual(a: Set<number>, b: Set<number>): boolean {
-  if (a.size !== b.size) return false;
-  for (const value of a) if (!b.has(value)) return false;
-  return true;
-}
+const TIME_OPTIONS = Array.from({ length: 49 }, (_, index) => index * 30);
 
-/** Groups sorted slot indices into contiguous [startIndex, endIndex] runs. */
-function contiguousRuns(sorted: number[]): Array<[number, number]> {
-  const runs: Array<[number, number]> = [];
-  let start: number | null = null;
-  let prev = -2;
-  for (const index of sorted) {
-    if (start === null) {
-      start = index;
-    } else if (index !== prev + 1) {
-      runs.push([start, prev]);
-      start = index;
-    }
-    prev = index;
+function defaultNurseAvailability(nurse: MarketplaceNurse): NurseAvailability {
+  const existing = (nurse.availability ?? []).find((item) => (item.status ?? "").toUpperCase() === "ACTIVE")
+    ?? nurse.availability?.[0];
+  if (existing) {
+    return {
+      ...existing,
+      breaks: [...(existing.breaks ?? [])],
+      off_days: [...(existing.off_days ?? [])],
+      service_area_norms: [...(existing.service_area_norms ?? [])],
+    };
   }
-  if (start !== null) runs.push([start, prev]);
-  return runs;
+  return {
+    breaks: [],
+    busy_buffer_minutes: 60,
+    emirate: "AUH",
+    end_minute: 1080,
+    off_days: [],
+    priority: 100,
+    service_area_norms: [],
+    slot_interval_minutes: 30,
+    start_minute: 540,
+    status: "ACTIVE",
+    vertical_id: "laboratory",
+  };
 }
 
-/** Longest run of consecutive calendar days within the given date keys. */
-function maxConsecutiveDays(keys: string[]): number {
-  const times = keys
-    .map((k) => new Date(`${k}T00:00:00`).getTime())
-    .filter((t) => !Number.isNaN(t))
-    .sort((a, b) => a - b);
-  let max = 0;
-  let run = 0;
-  let prev = NaN;
-  const DAY = 24 * 60 * 60 * 1000;
-  for (const t of times) {
-    run = !Number.isNaN(prev) && t - prev === DAY ? run + 1 : 1;
-    if (run > max) max = run;
-    prev = t;
-  }
-  return max;
+function timeOptionLabel(minutes: number) {
+  if (minutes === 1440) return "12:00 AM next day";
+  return minutesToLabel(minutes);
 }
 
-type AvailabilityView = "month" | "day";
-
-type CalendarBlock = {
-  blockId?: number | string;
-  block_id?: number | string;
-  id?: number | string;
-  kind?: string;
-  blockDate?: string;
-  date?: string;
-  startMinute?: number | null;
-  start_minute?: number | null;
-  endMinute?: number | null;
-  end_minute?: number | null;
-  status?: string;
-};
-
-function AvailabilityEditModal({
+function NurseAvailabilityModal({
   accountId,
-  row,
+  nurse,
   onClose,
   onSaved,
 }: {
   accountId: string;
-  row: AvailabilityRow;
+  nurse: MarketplaceNurse;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const now = new Date();
-  const [view, setView] = useState<AvailabilityView>("month");
-  const [cursor, setCursor] = useState({ year: now.getFullYear(), month: now.getMonth(), day: now.getDate() });
-  const [closedDays, setClosedDays] = useState<Set<string>>(new Set());
-  const [blockedSlots, setBlockedSlots] = useState<Record<string, Set<number>>>({});
-  const [isLoading, setIsLoading] = useState(true);
+  const initial = defaultNurseAvailability(nurse);
+  const [verticalId, setVerticalId] = useState(initial.vertical_id);
+  const [emirate, setEmirate] = useState(initial.emirate);
+  const [startMinute, setStartMinute] = useState(initial.start_minute);
+  const [endMinute, setEndMinute] = useState(initial.end_minute);
+  const [slotInterval, setSlotInterval] = useState(initial.slot_interval_minutes);
+  const [busyBuffer, setBusyBuffer] = useState(initial.busy_buffer_minutes);
+  const [priority, setPriority] = useState(initial.priority);
+  const [status, setStatus] = useState(initial.status || "ACTIVE");
+  const [offDays, setOffDays] = useState<string[]>(initial.off_days ?? []);
+  const [breaks, setBreaks] = useState(initial.breaks ?? []);
+  const [serviceAreas, setServiceAreas] = useState((initial.service_area_norms ?? []).join(", "));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dragRef = useRef<{ active: boolean; add: boolean } | null>(null);
 
-  // Snapshot of what the server currently has, for diffing on save.
-  const serverClosedRef = useRef<Map<string, number | string | null>>(new Map());
-  const serverSlotsRef = useRef<Record<string, Set<number>>>({});
-  const hourBlockIdsRef = useRef<Record<string, Array<number | string>>>({});
+  const breaksAreValid = breaks.every((item) => item.end_minute > item.start_minute);
+  const canSave = endMinute > startMinute && breaksAreValid;
 
-  useEffect(() => {
-    function end() {
-      dragRef.current = null;
-    }
-    window.addEventListener("pointerup", end);
-    return () => window.removeEventListener("pointerup", end);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setIsLoading(true);
-      setError(null);
-      // 12-month window from the start of the current month.
-      const fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      const toDate = new Date(now.getFullYear(), now.getMonth() + 12, 0);
-      const from = dayKey(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
-      const to = dayKey(toDate.getFullYear(), toDate.getMonth(), toDate.getDate());
-      try {
-        const data = await proxyJson<{ blocks?: CalendarBlock[] }>(
-          `availability/collectors/${row.collector_id}/calendar?vertical_id=${encodeURIComponent(row.vertical_id)}&from=${from}&to=${to}`,
-          accountId,
-        );
-        if (cancelled) return;
-
-        const closed = new Map<string, number | string | null>();
-        const slots: Record<string, Set<number>> = {};
-        const hourIds: Record<string, Array<number | string>> = {};
-
-        for (const block of data.blocks ?? []) {
-          if (block.status && block.status !== "ACTIVE") continue; // skip cancelled
-          const date = block.blockDate ?? block.date;
-          if (!date) continue;
-          const id = block.blockId ?? block.block_id ?? block.id ?? null;
-          const startMinute = block.startMinute ?? block.start_minute;
-          const endMinute = block.endMinute ?? block.end_minute;
-          if (block.kind === "DAY" || startMinute == null || endMinute == null) {
-            closed.set(date, id);
-            continue;
-          }
-          const set = slots[date] ?? (slots[date] = new Set<number>());
-          const startIdx = Math.floor(startMinute / 30);
-          const endIdx = Math.ceil(endMinute / 30);
-          for (let i = startIdx; i < endIdx; i += 1) set.add(i);
-          if (id != null) (hourIds[date] ?? (hourIds[date] = [])).push(id);
-        }
-
-        serverClosedRef.current = closed;
-        serverSlotsRef.current = slots;
-        hourBlockIdsRef.current = hourIds;
-        setClosedDays(new Set(closed.keys()));
-        setBlockedSlots(
-          Object.fromEntries(Object.entries(slots).map(([key, set]) => [key, new Set(set)])),
-        );
-      } catch (err) {
-        if (!cancelled) setError(friendlyAckError(err));
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row.collector_id, row.vertical_id, accountId]);
-
-  const selectedKey = dayKey(cursor.year, cursor.month, cursor.day);
-
-  function toggleClosedDay(key: string) {
-    if (closedDays.has(key)) {
-      const next = new Set(closedDays);
-      next.delete(key);
-      setClosedDays(next);
-      setError(null);
-      return;
-    }
-    // Block marking a 3rd consecutive day off (backend rule).
-    if (maxConsecutiveDays([...closedDays, key]) > 2) {
-      setError("You can't mark more than 2 consecutive days unavailable.");
-      return;
-    }
-    const next = new Set(closedDays);
-    next.add(key);
-    setClosedDays(next);
-    setError(null);
+  function toggleOffDay(value: string) {
+    setOffDays((current) =>
+      current.includes(value) ? current.filter((item) => item !== value) : [...current, value],
+    );
   }
 
-  function setSlot(key: string, index: number, add: boolean) {
-    setBlockedSlots((current) => {
-      const next = { ...current };
-      const set = new Set(next[key] ?? []);
-      if (add) set.add(index);
-      else set.delete(index);
-      next[key] = set;
-      return next;
-    });
+  function updateBreak(index: number, key: "start_minute" | "end_minute", value: number) {
+    setBreaks((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
+    );
   }
 
-  function shiftMonth(delta: number) {
-    setCursor((c) => {
-      const d = new Date(c.year, c.month + delta, 1);
-      return { year: d.getFullYear(), month: d.getMonth(), day: 1 };
-    });
-  }
-
-  function shiftDay(delta: number) {
-    setCursor((c) => {
-      const d = new Date(c.year, c.month, c.day + delta);
-      return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
-    });
-  }
-
-  async function save() {
-    // Client guard for the backend's "no more than 2 consecutive days" rule.
-    if (maxConsecutiveDays([...closedDays]) > 2) {
-      setError("You can't mark more than 2 consecutive days unavailable.");
-      return;
-    }
+  async function saveAvailability(event: FormEvent) {
+    event.preventDefault();
+    if (!canSave) return;
     setIsSaving(true);
     setError(null);
-
-    const blockBase = `availability/collectors/${row.collector_id}/blocks`;
-    const creates: Array<Record<string, unknown>> = [];
-    const deletes: Array<number | string> = [];
-
-    const dates = new Set<string>([
-      ...closedDays,
-      ...serverClosedRef.current.keys(),
-      ...Object.keys(blockedSlots),
-      ...Object.keys(serverSlotsRef.current),
-    ]);
-
-    for (const date of dates) {
-      const wantClosed = closedDays.has(date);
-      const hadClosed = serverClosedRef.current.has(date);
-      if (wantClosed && !hadClosed) {
-        creates.push({ vertical_id: row.vertical_id, kind: "DAY", date });
-      } else if (!wantClosed && hadClosed) {
-        const id = serverClosedRef.current.get(date);
-        if (id != null) deletes.push(id);
-      }
-
-      const wantSlots = wantClosed ? new Set<number>() : blockedSlots[date] ?? new Set<number>();
-      const hadSlots = serverSlotsRef.current[date] ?? new Set<number>();
-      if (!setsEqual(wantSlots, hadSlots)) {
-        for (const id of hourBlockIdsRef.current[date] ?? []) deletes.push(id);
-        for (const [startIdx, endIdx] of contiguousRuns([...wantSlots].sort((a, b) => a - b))) {
-          creates.push({
-            vertical_id: row.vertical_id,
-            kind: "HOURS",
-            date,
-            start_minute: startIdx * 30,
-            end_minute: (endIdx + 1) * 30,
-          });
-        }
-      }
-    }
-
+    const body = {
+      breaks: breaks.map((item) => ({
+        start_minute: item.start_minute,
+        end_minute: item.end_minute,
+      })),
+      busy_buffer_minutes: busyBuffer,
+      emirate,
+      end_minute: endMinute,
+      off_days: offDays,
+      priority,
+      service_area_norms: serviceAreas
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+      slot_interval_minutes: slotInterval,
+      start_minute: startMinute,
+      status,
+      vertical_id: verticalId,
+    };
     try {
-      // Delete first to free up slots, then create the new blocks.
-      for (const id of deletes) {
-        await proxyJson(`availability/blocks/${id}`, accountId, { method: "DELETE" });
-      }
-      for (const body of creates) {
-        await proxyJson(blockBase, accountId, { body: JSON.stringify(body), method: "POST" });
-      }
+      await proxyJson(`nurses/${nurse.nurse_id}/availability`, accountId, {
+        body: JSON.stringify(body),
+        method: "PATCH",
+      });
       await onSaved();
       onClose();
     } catch (err) {
@@ -2076,160 +1936,170 @@ function AvailabilityEditModal({
     }
   }
 
-  const firstWeekday = new Date(cursor.year, cursor.month, 1).getDay();
-  const daysInMonth = new Date(cursor.year, cursor.month + 1, 0).getDate();
-  const monthCells: Array<number | null> = [
-    ...Array.from({ length: firstWeekday }, () => null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ];
-
-  const dayClosed = closedDays.has(selectedKey);
-  const daySlots = blockedSlots[selectedKey] ?? new Set<number>();
-
   return (
     <div className="modal-overlay">
-      <div
-        aria-label={`Availability for ${row.collector_name}`}
+      <form
+        aria-label={`Availability for ${nurse.display_name}`}
         aria-modal="true"
-        className="modal-panel modal-panel--wide"
+        className="modal-panel"
+        onSubmit={saveAvailability}
         role="dialog"
       >
         <div className="modal-head">
           <div>
-            <div className="eyebrow">{row.vertical_id?.toUpperCase()} · {row.emirate}</div>
-            <h2>{row.collector_name}</h2>
+            <div className="eyebrow">Nurse availability</div>
+            <h2>{nurse.display_name}</h2>
+            <p>Set the active schedule used when assigning this nurse to bookings.</p>
           </div>
           <button aria-label="Close" className="modal-close" onClick={onClose} type="button">
             <X size={18} />
           </button>
         </div>
 
-        <div className="cal-toolbar">
-          <SegmentPicker
-            onChange={setView}
-            options={[
-              { label: "Month", value: "month" },
-              { label: "Day", value: "day" },
-            ]}
-            value={view}
-          />
-          <div className="cal-nav">
-            <button
-              aria-label="Previous"
-              className="cal-nav-button"
-              onClick={() => (view === "month" ? shiftMonth(-1) : shiftDay(-1))}
-              type="button"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <span className="cal-nav-label">
-              {view === "month"
-                ? `${MONTH_LABELS[cursor.month]} ${cursor.year}`
-                : `${WEEKDAY_LABELS[new Date(cursor.year, cursor.month, cursor.day).getDay()]}, ${cursor.day} ${MONTH_LABELS[cursor.month].slice(0, 3)} ${cursor.year}`}
-            </span>
-            <button
-              aria-label="Next"
-              className="cal-nav-button"
-              onClick={() => (view === "month" ? shiftMonth(1) : shiftDay(1))}
-              type="button"
-            >
-              <ChevronRight size={18} />
-            </button>
+        <div className="modal-form">
+          <label>
+            Vertical
+            <select onChange={(event) => setVerticalId(event.target.value)} value={verticalId}>
+              {VERTICAL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Emirate
+            <select onChange={(event) => setEmirate(event.target.value)} value={emirate}>
+              {EMIRATE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Starts
+            <select onChange={(event) => setStartMinute(Number(event.target.value))} value={startMinute}>
+              {TIME_OPTIONS.slice(0, -1).map((value) => (
+                <option key={value} value={value}>{timeOptionLabel(value)}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Ends
+            <select onChange={(event) => setEndMinute(Number(event.target.value))} value={endMinute}>
+              {TIME_OPTIONS.slice(1).map((value) => (
+                <option key={value} value={value}>{timeOptionLabel(value)}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Slot interval
+            <select onChange={(event) => setSlotInterval(Number(event.target.value))} value={slotInterval}>
+              {[15, 30, 45, 60, 90, 120].map((value) => (
+                <option key={value} value={value}>{value} minutes</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Busy buffer
+            <select onChange={(event) => setBusyBuffer(Number(event.target.value))} value={busyBuffer}>
+              {[0, 30, 45, 60, 90, 120, 180].map((value) => (
+                <option key={value} value={value}>{value} minutes</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Priority
+            <input
+              min={0}
+              onChange={(event) => setPriority(Number(event.target.value))}
+              type="number"
+              value={priority}
+            />
+          </label>
+          <label>
+            Status
+            <select onChange={(event) => setStatus(event.target.value)} value={status}>
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+            </select>
+          </label>
+          <label>
+            Service areas
+            <input
+              onChange={(event) => setServiceAreas(event.target.value)}
+              placeholder="All areas"
+              value={serviceAreas}
+            />
+          </label>
+        </div>
+
+        <div className="schedule-section">
+          <div className="modal-ack-label">Off days</div>
+          <div className="weekday-toggle-row">
+            {NURSE_WEEKDAYS.map((day) => (
+              <button
+                className={offDays.includes(day.value) ? "weekday-toggle active" : "weekday-toggle"}
+                key={day.value}
+                onClick={() => toggleOffDay(day.value)}
+                type="button"
+              >
+                {day.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {isLoading ? (
-          <div className="cal-loading">
-            <Loader2 className="spin" size={22} />
-          </div>
-        ) : view === "month" ? (
-          <div className="cal-month">
-            <div className="cal-weekdays">
-              {WEEKDAY_LABELS.map((label) => (
-                <span key={label}>{label}</span>
-              ))}
-            </div>
-            <div className="cal-grid">
-              {monthCells.map((day, index) => {
-                if (day === null) return <span aria-hidden="true" className="cal-cell empty" key={`e${index}`} />;
-                const key = dayKey(cursor.year, cursor.month, day);
-                const closed = closedDays.has(key);
-                const partial = !closed && (blockedSlots[key]?.size ?? 0) > 0;
-                const isToday =
-                  day === now.getDate() && cursor.month === now.getMonth() && cursor.year === now.getFullYear();
-                return (
-                  <button
-                    className={[
-                      "cal-cell",
-                      closed ? "closed" : "",
-                      partial ? "partial" : "",
-                      isToday ? "today" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    key={key}
-                    onClick={() => toggleClosedDay(key)}
-                    onDoubleClick={() => {
-                      setCursor({ year: cursor.year, month: cursor.month, day });
-                      setView("day");
-                    }}
-                    type="button"
-                  >
-                    <span className="cal-date">{day}</span>
-                    {partial ? <span className="cal-dot" aria-hidden="true" /> : null}
-                    {closed ? <span className="cal-cell-tag">Off</span> : null}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="cal-hint">Tap a day to mark it unavailable. Double-tap to edit its hours.</p>
-          </div>
-        ) : (
-          <div className="cal-day">
+        <div className="schedule-section">
+          <div className="schedule-section-head">
+            <div className="modal-ack-label">Breaks</div>
             <button
-              className={dayClosed ? "cal-dayoff-toggle active" : "cal-dayoff-toggle"}
-              onClick={() => toggleClosedDay(selectedKey)}
+              className="inline-action-button"
+              onClick={() => setBreaks((current) => [...current, { start_minute: 780, end_minute: 840, status: "ACTIVE" }])}
               type="button"
             >
-              <Check size={15} />
-              {dayClosed ? "Whole day unavailable" : "Mark whole day unavailable"}
+              <Plus size={14} />
+              Add break
             </button>
-            <div className={dayClosed ? "cal-slots disabled" : "cal-slots"}>
-              {Array.from({ length: SLOTS_PER_DAY }, (_, i) => {
-                const blocked = dayClosed || daySlots.has(i);
-                return (
+          </div>
+          {breaks.length === 0 ? (
+            <div className="schedule-hint">No recurring breaks.</div>
+          ) : (
+            <div className="break-list">
+              {breaks.map((item, index) => (
+                <div className="break-row" key={`${item.start_minute}-${item.end_minute}-${index}`}>
+                  <select onChange={(event) => updateBreak(index, "start_minute", Number(event.target.value))} value={item.start_minute}>
+                    {TIME_OPTIONS.slice(0, -1).map((value) => (
+                      <option key={value} value={value}>{timeOptionLabel(value)}</option>
+                    ))}
+                  </select>
+                  <span>to</span>
+                  <select onChange={(event) => updateBreak(index, "end_minute", Number(event.target.value))} value={item.end_minute}>
+                    {TIME_OPTIONS.slice(1).map((value) => (
+                      <option key={value} value={value}>{timeOptionLabel(value)}</option>
+                    ))}
+                  </select>
                   <button
-                    className={blocked ? "cal-slot blocked" : "cal-slot"}
-                    disabled={dayClosed}
-                    key={i}
-                    onPointerDown={() => {
-                      const add = !daySlots.has(i);
-                      dragRef.current = { active: true, add };
-                      setSlot(selectedKey, i, add);
-                    }}
-                    onPointerEnter={() => {
-                      if (dragRef.current?.active) setSlot(selectedKey, i, dragRef.current.add);
-                    }}
+                    aria-label="Remove break"
+                    className="modal-close break-remove"
+                    onClick={() => setBreaks((current) => current.filter((_, itemIndex) => itemIndex !== index))}
                     type="button"
                   >
-                    <span className="cal-slot-time">{slotLabel(i)}</span>
-                    <span className="cal-slot-state">{blocked ? "Unavailable" : "Available"}</span>
+                    <X size={14} />
                   </button>
-                );
-              })}
+                </div>
+              ))}
             </div>
-            <p className="cal-hint">Tap or drag 30-minute slots to mark them unavailable.</p>
-          </div>
-        )}
+          )}
+        </div>
+
+        {error ? <div className="modal-action-error">{error}</div> : null}
+        {!canSave ? <div className="modal-action-error">Check that the end time is after the start time and breaks are valid.</div> : null}
 
         <div className="modal-actions">
-          {error ? <div className="modal-action-error">{error}</div> : null}
-          <button className="modal-cta" disabled={isLoading || isSaving} onClick={save} type="button">
+          <button className="modal-cta" disabled={!canSave || isSaving} type="submit">
             {isSaving ? <Loader2 className="spin" size={16} /> : <Check size={16} />}
             Save availability
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
