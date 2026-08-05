@@ -1711,6 +1711,7 @@ function AvailabilityView({
   onChanged: () => Promise<void>;
 }) {
   const [editNurseId, setEditNurseId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
   const editNurse = nurses.find((nurse) => nurse.nurse_id === editNurseId) ?? null;
 
   return (
@@ -1720,10 +1721,14 @@ function AvailabilityView({
           <span className="list-header-label">Nurse availability</span>
           <span className="list-header-count">{nurses.length}</span>
         </div>
+        <button className="icon-action" onClick={() => setShowCreate(true)} type="button">
+          <Plus size={16} />
+          <span>Add nurse</span>
+        </button>
       </div>
 
       {nurses.length === 0 ? (
-        <EmptyState title="No nurses yet" body="Add nurses first, then set availability for each nurse." />
+        <EmptyState title="No nurses yet" body="Add the first nurse, then set availability for each nurse." />
       ) : (
         <div className="booking-list" aria-label="Availability">
           {nurses.map((nurse) => (
@@ -1736,6 +1741,9 @@ function AvailabilityView({
         </div>
       )}
 
+      {showCreate ? (
+        <NurseFormModal accountId={accountId} onClose={() => setShowCreate(false)} onSaved={onChanged} />
+      ) : null}
       {editNurse ? (
         <NurseAvailabilityModal
           accountId={accountId}
