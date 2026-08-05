@@ -121,16 +121,44 @@ async function loadDashboard(
 }
 
 export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps) {
-  if (accountId) return <AccountDashboard accountId={accountId} initialView={initialView} />;
-  return <AuthenticatedMarketplaceBootstrap initialView={initialView} />;
+  return (
+    <ClerkProvider afterSignOutUrl="/sign-in">
+      {accountId ? (
+        <AccountDashboard accountId={accountId} initialView={initialView} />
+      ) : (
+        <AuthenticatedMarketplaceBootstrapInner initialView={initialView} />
+      )}
+    </ClerkProvider>
+  );
 }
 
 function AccountDashboard({ accountId, initialView }: { accountId: string; initialView?: string }) {
+  const { getToken } = useAuth();
+  const { isLoaded, isSignedIn } = useUser();
+  const { organization } = useOrganization();
+  const { isLoaded: organizationListLoaded, setActive, userMemberships } = useOrganizationList({ userMemberships: true });
   const [state, setState] = useState<AccountDashboardState>({ accountId, data: null });
+  const activationAttemptedRef = useRef<string | null>(null);
+  const membershipsData = userMemberships.data;
+  const memberships = useMemo(() => membershipsData ?? [], [membershipsData]);
+  const activeOrganizationId = organization?.id ?? null;
 
   useEffect(() => {
+    if (!isLoaded || !isSignedIn || !organizationListLoaded || activeOrganizationId || memberships.length !== 1) return;
+
+    const organizationId = memberships[0]?.organization.id;
+    if (!organizationId || activationAttemptedRef.current === organizationId) return;
+
+    activationAttemptedRef.current = organizationId;
+    void setActive({ organization: organizationId });
+  }, [activeOrganizationId, isLoaded, isSignedIn, memberships, organizationListLoaded, setActive]);
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || !organizationListLoaded) return;
+    if (!activeOrganizationId && memberships.length === 1) return;
+
     let cancelled = false;
-    loadDashboard(accountId)
+    loadDashboard(accountId, getToken, activeOrganizationId)
       .then((next) => {
         if (!cancelled) setState({ accountId, data: next });
       })
@@ -142,19 +170,28 @@ function AccountDashboard({ accountId, initialView }: { accountId: string; initi
     return () => {
       cancelled = true;
     };
-  }, [accountId]);
+  }, [accountId, activeOrganizationId, getToken, isLoaded, isSignedIn, memberships.length, organizationListLoaded]);
+
+  if (!isLoaded) return <SpinnerOnly />;
+
+  if (!isSignedIn) {
+    const search = new URLSearchParams({ account_id: accountId });
+    if (initialView) search.set("view", initialView);
+    return (
+      <StatusCard
+        title="Sign in"
+        body="Sign in with your marketplace email to open this dashboard."
+        actionHref={`/sign-in?redirect_url=${encodeURIComponent(`/?${search.toString()}`)}`}
+        actionLabel="Sign in"
+      />
+    );
+  }
+
+  if (!organizationListLoaded || (!activeOrganizationId && memberships.length === 1)) return <SpinnerOnly />;
 
   const data = state.accountId === accountId ? state.data : null;
   if (!data) return <SpinnerOnly />;
   return <MarketplaceDashboard initialData={data} initialView={initialView} showUserButton={false} />;
-}
-
-function AuthenticatedMarketplaceBootstrap({ initialView }: Pick<BootstrapProps, "initialView">) {
-  return (
-    <ClerkProvider afterSignOutUrl="/sign-in">
-      <AuthenticatedMarketplaceBootstrapInner initialView={initialView} />
-    </ClerkProvider>
-  );
 }
 
 function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapProps, "initialView">) {
