@@ -4,6 +4,7 @@ import { ClerkProvider, useAuth, useOrganization, useOrganizationList, useUser }
 import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MarketplaceDashboard } from "@/components/MarketplaceDashboard";
+import { MARKETPLACE_CLERK_PROVIDER_PROPS } from "@/lib/clerk";
 import {
   BookingsResponse,
   DashboardData,
@@ -122,7 +123,7 @@ async function loadDashboard(
 
 export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps) {
   return (
-    <ClerkProvider afterSignOutUrl="/sign-in">
+    <ClerkProvider {...MARKETPLACE_CLERK_PROVIDER_PROPS}>
       {accountId ? (
         <AccountDashboard accountId={accountId} initialView={initialView} />
       ) : (
