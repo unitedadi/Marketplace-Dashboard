@@ -172,6 +172,7 @@ export type MarketplaceNurse = {
 };
 
 export type AvailabilityRow = {
+  availability_kind?: string;
   vertical_id: string;
   collector_id: string;
   collector_name: string;
@@ -188,6 +189,47 @@ export type AvailabilityRow = {
     end_minute: number;
     status: string;
   }>;
+};
+
+export type AvailabilityBlock = {
+  blockId: number;
+  verticalId: string;
+  collectorId: string;
+  blockDate: string;
+  kind: "DAY" | "HOURS";
+  startMinute: number | null;
+  endMinute: number | null;
+  status: string;
+  reason: string | null;
+  actorId: string | null;
+  actorEmail: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  cancelledAt: string | null;
+};
+
+export type AvailabilityCalendarDay = {
+  date: string;
+  unavailable_day: boolean;
+  hour_blocks: Array<{
+    block_id: number;
+    start_minute: number;
+    end_minute: number;
+    reason: string | null;
+  }>;
+};
+
+export type AvailabilityCalendarResponse = {
+  account: MarketplaceAccount;
+  collector: {
+    collector_id: string;
+    name: string;
+  };
+  vertical_id: string;
+  from: string;
+  to: string;
+  blocks: AvailabilityBlock[];
+  days: AvailabilityCalendarDay[];
 };
 
 export type BookingsResponse = {

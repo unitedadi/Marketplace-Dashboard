@@ -7,6 +7,7 @@ import {
   CalendarCheck2,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Copy,
@@ -28,6 +29,8 @@ import {
   BiomarkerGroup,
   BookingMember,
   BookingsResponse,
+  AvailabilityCalendarResponse,
+  AvailabilityRow,
   DashboardData,
   extractItemBiomarkers,
   extractItemIngredients,
@@ -323,7 +326,15 @@ export function MarketplaceDashboard({
           ) : null}
           {safeView === "revenue" ? <RevenueView accountName={accountName} entries={data.ledger.items} /> : null}
           {safeView === "nurses" ? <NursesView accountId={accountId} data={data} onChanged={refresh} /> : null}
-          {safeView === "availability" ? <AvailabilityView accountId={accountId} nurses={data.nurses.items} onChanged={refresh} /> : null}
+          {safeView === "availability" ? (
+            <AvailabilityView
+              accountId={accountId}
+              availabilityRows={data.availability.items}
+              nurses={data.nurses.items}
+              parties={data.context.parties}
+              onChanged={refresh}
+            />
+          ) : null}
           {safeView === "notifications" ? <NotificationsView accountId={accountId} parties={data.context.parties} /> : null}
           {safeView === "team" ? <TeamView accountId={accountId} currentEmail={data.context.account.owner_email} /> : null}
         </section>
@@ -1701,18 +1712,122 @@ function minutesToLabel(minutes: number): string {
   return `${hour12}:${mins.toString().padStart(2, "0")} ${period}`;
 }
 
+type AvailabilityCollectorOption = {
+  key: string;
+  collectorId: string;
+  collectorName: string;
+  verticalId: string;
+  emirate: string | null;
+  startMinute: number;
+  endMinute: number;
+};
+
+function ymdFromUtcDate(date: Date) {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function todayDubaiYmd() {
+  return ymdFromUtcDate(new Date(Date.now() + 4 * 60 * 60 * 1000));
+}
+
+function monthParts(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return { year, monthIndex: monthNumber - 1 };
+}
+
+function daysInMonth(month: string) {
+  const { year, monthIndex } = monthParts(month);
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+
+function monthRange(month: string) {
+  const lastDay = daysInMonth(month);
+  return {
+    from: `${month}-01`,
+    to: `${month}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+function shiftMonth(month: string, delta: number) {
+  const { year, monthIndex } = monthParts(month);
+  const next = new Date(Date.UTC(year, monthIndex + delta, 1));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(month: string) {
+  const { year, monthIndex } = monthParts(month);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[monthIndex]} ${year}`;
+}
+
+function buildCalendarCells(month: string) {
+  const { year, monthIndex } = monthParts(month);
+  const firstWeekday = new Date(Date.UTC(year, monthIndex, 1)).getUTCDay();
+  const totalDays = daysInMonth(month);
+  const cells: Array<string | null> = Array.from({ length: firstWeekday }, () => null);
+  for (let day = 1; day <= totalDays; day += 1) {
+    cells.push(`${month}-${String(day).padStart(2, "0")}`);
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+function calendarCollectorOptions(availabilityRows: AvailabilityRow[], parties: MarketplaceParty[]): AvailabilityCollectorOption[] {
+  const options = new Map<string, AvailabilityCollectorOption>();
+  for (const row of availabilityRows) {
+    if (!row.collector_id) continue;
+    const key = `${row.vertical_id}:${row.collector_id}`;
+    options.set(key, {
+      key,
+      collectorId: row.collector_id,
+      collectorName: row.collector_name || row.collector_id,
+      verticalId: row.vertical_id || "laboratory",
+      emirate: row.emirate || null,
+      startMinute: row.start_minute || 540,
+      endMinute: row.end_minute || 1080,
+    });
+  }
+  for (const party of parties) {
+    if (party.role.toUpperCase() !== "COLLECTOR") continue;
+    const key = `laboratory:${party.party_id}`;
+    if (options.has(key)) continue;
+    options.set(key, {
+      key,
+      collectorId: party.party_id,
+      collectorName: party.label || party.name || party.party_id,
+      verticalId: "laboratory",
+      emirate: null,
+      startMinute: 540,
+      endMinute: 1080,
+    });
+  }
+  return Array.from(options.values());
+}
+
 function AvailabilityView({
   accountId,
+  availabilityRows,
   nurses,
+  parties,
   onChanged,
 }: {
   accountId: string;
+  availabilityRows: AvailabilityRow[];
   nurses: MarketplaceNurse[];
+  parties: MarketplaceParty[];
   onChanged: () => Promise<void>;
 }) {
   const [editNurseId, setEditNurseId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const editNurse = nurses.find((nurse) => nurse.nurse_id === editNurseId) ?? null;
+  const collectorOptions = useMemo(
+    () => calendarCollectorOptions(availabilityRows, parties),
+    [availabilityRows, parties],
+  );
 
   return (
     <div className="view-stack">
@@ -1752,6 +1867,284 @@ function AvailabilityView({
           onSaved={onChanged}
         />
       ) : null}
+
+      <CollectorAvailabilityCalendar accountId={accountId} collectorOptions={collectorOptions} />
+    </div>
+  );
+}
+
+function CollectorAvailabilityCalendar({
+  accountId,
+  collectorOptions,
+}: {
+  accountId: string;
+  collectorOptions: AvailabilityCollectorOption[];
+}) {
+  const today = todayDubaiYmd();
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [month, setMonth] = useState(today.slice(0, 7));
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [calendarState, setCalendarState] = useState<{
+    calendar: AvailabilityCalendarResponse | null;
+    error: string | null;
+    key: string;
+  } | null>(null);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const selectedCollector = collectorOptions.find((option) => option.key === selectedKey) ?? collectorOptions[0] ?? null;
+  const { from, to } = monthRange(month);
+  const calendarRequestPath = selectedCollector
+    ? `availability/collectors/${selectedCollector.collectorId}/calendar?vertical_id=${encodeURIComponent(selectedCollector.verticalId)}&from=${from}&to=${to}`
+    : null;
+  const calendarRequestKey = selectedCollector ? `${accountId}:${selectedCollector.key}:${month}` : null;
+  const calendar = calendarState?.key === calendarRequestKey ? calendarState.calendar : null;
+  const calendarError = calendarState?.key === calendarRequestKey ? calendarState.error : null;
+  const isLoading = Boolean(calendarRequestKey && calendarState?.key !== calendarRequestKey);
+  const activeBlocks = useMemo(
+    () => (calendar?.blocks ?? []).filter((block) => block.status.toUpperCase() === "ACTIVE"),
+    [calendar],
+  );
+  const selectedDateBlocks = activeBlocks.filter((block) => block.blockDate === selectedDate);
+  const dayBlock = selectedDateBlocks.find((block) => block.kind === "DAY") ?? null;
+  const isDayUnavailable = Boolean(dayBlock);
+  const timeSlots = useMemo(() => {
+    const start = selectedCollector?.startMinute ?? 540;
+    const end = selectedCollector?.endMinute ?? 1080;
+    const slots: Array<{ start: number; end: number }> = [];
+    for (let minute = start; minute < end; minute += 30) {
+      slots.push({ start: minute, end: Math.min(minute + 30, end) });
+    }
+    return slots;
+  }, [selectedCollector]);
+
+  useEffect(() => {
+    if (!calendarRequestPath || !calendarRequestKey) return;
+    let cancelled = false;
+    proxyJson<AvailabilityCalendarResponse>(calendarRequestPath, accountId)
+      .then((next) => {
+        if (!cancelled) setCalendarState({ calendar: next, error: null, key: calendarRequestKey });
+      })
+      .catch((err) => {
+        if (!cancelled) setCalendarState({ calendar: null, error: friendlyAckError(err), key: calendarRequestKey });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, calendarRequestKey, calendarRequestPath]);
+
+  async function reloadCalendar() {
+    if (!calendarRequestPath || !calendarRequestKey) return;
+    const next = await proxyJson<AvailabilityCalendarResponse>(calendarRequestPath, accountId);
+    setCalendarState({ calendar: next, error: null, key: calendarRequestKey });
+  }
+
+  async function deleteBlock(blockId: number) {
+    await proxyJson(`availability/blocks/${blockId}`, accountId, { method: "DELETE" });
+  }
+
+  async function createBlock(body: Record<string, unknown>) {
+    if (!selectedCollector) return;
+    await proxyJson(`availability/collectors/${selectedCollector.collectorId}/blocks`, accountId, {
+      body: JSON.stringify({
+        vertical_id: selectedCollector.verticalId,
+        ...body,
+      }),
+      method: "POST",
+    });
+  }
+
+  async function toggleDay() {
+    if (!selectedCollector) return;
+    setSavingKey(`day:${selectedDate}`);
+    setActionError(null);
+    try {
+      if (dayBlock) {
+        await deleteBlock(dayBlock.blockId);
+      } else {
+        await createBlock({
+          kind: "DAY",
+          date: selectedDate,
+          reason: "Unavailable",
+        });
+      }
+      await reloadCalendar();
+    } catch (err) {
+      setActionError(friendlyAckError(err));
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  async function toggleSlot(startMinute: number, endMinute: number) {
+    if (!selectedCollector || isDayUnavailable) return;
+    const overlappingBlock = selectedDateBlocks.find((block) => (
+      block.kind === "HOURS"
+      && block.startMinute !== null
+      && block.endMinute !== null
+      && block.startMinute < endMinute
+      && block.endMinute > startMinute
+    ));
+    setSavingKey(`slot:${selectedDate}:${startMinute}`);
+    setActionError(null);
+    try {
+      if (overlappingBlock) {
+        await deleteBlock(overlappingBlock.blockId);
+      } else {
+        await createBlock({
+          kind: "HOURS",
+          date: selectedDate,
+          start_minute: startMinute,
+          end_minute: endMinute,
+          reason: "Unavailable",
+        });
+      }
+      await reloadCalendar();
+    } catch (err) {
+      setActionError(friendlyAckError(err));
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  if (!collectorOptions.length) {
+    return (
+      <div className="calendar-panel">
+        <div className="list-header">
+          <span className="list-header-label">Calendar blocks</span>
+        </div>
+        <EmptyState title="No collector calendar" body="Link an active collector before setting day or hour blocks." />
+      </div>
+    );
+  }
+
+  const cells = buildCalendarCells(month);
+
+  return (
+    <div className="calendar-panel">
+      <div className="list-toolbar calendar-toolbar">
+        <div className="list-header">
+          <span className="list-header-label">Calendar blocks</span>
+          <span className="list-header-count">{activeBlocks.length}</span>
+        </div>
+        {collectorOptions.length > 1 ? (
+          <select
+            className="calendar-select"
+            onChange={(event) => setSelectedKey(event.target.value)}
+            value={selectedCollector?.key ?? ""}
+          >
+            {collectorOptions.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.collectorName} · {option.verticalId}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+
+      {actionError || calendarError ? (
+        <div className="notice bad notice--inline">{actionError ?? calendarError}</div>
+      ) : null}
+
+      <div className="calendar-split">
+        <div>
+          <div className="cal-toolbar">
+            <button className="cal-nav-button" onClick={() => setMonth((current) => shiftMonth(current, -1))} type="button">
+              <ChevronLeft size={17} />
+            </button>
+            <div className="cal-nav-label">{monthLabel(month)}</div>
+            <button className="cal-nav-button" onClick={() => setMonth((current) => shiftMonth(current, 1))} type="button">
+              <ChevronRight size={17} />
+            </button>
+          </div>
+
+          {isLoading ? (
+            <div className="cal-loading">
+              <Loader2 className="spin" size={22} />
+            </div>
+          ) : (
+            <div className="cal-month">
+              <div className="cal-weekdays">
+                {NURSE_WEEKDAYS.map((day) => (
+                  <span key={day.value}>{day.label}</span>
+                ))}
+              </div>
+              <div className="cal-grid">
+                {cells.map((date, index) => {
+                  if (!date) return <div className="cal-cell empty" key={`empty-${index}`} />;
+                  const blocks = activeBlocks.filter((block) => block.blockDate === date);
+                  const hasDayBlock = blocks.some((block) => block.kind === "DAY");
+                  const hasHourBlocks = blocks.some((block) => block.kind === "HOURS");
+                  const isSelected = date === selectedDate;
+                  return (
+                    <button
+                      className={[
+                        "cal-cell",
+                        date === today ? "today" : "",
+                        hasDayBlock ? "closed" : "",
+                        isSelected ? "selected" : "",
+                      ].filter(Boolean).join(" ")}
+                      key={date}
+                      onClick={() => setSelectedDate(date)}
+                      type="button"
+                    >
+                      <span className="cal-date">{Number(date.slice(-2))}</span>
+                      {hasDayBlock ? <span className="cal-cell-tag">Off</span> : hasHourBlocks ? <span className="cal-dot" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="cal-day">
+          <div className="cal-day-head">
+            <div>
+              <div className="eyebrow">{selectedCollector?.collectorName}</div>
+              <h3>{selectedDate}</h3>
+              <p>{selectedCollector?.emirate ?? "All emirates"} · {selectedCollector?.verticalId}</p>
+            </div>
+          </div>
+          <button
+            className={isDayUnavailable ? "cal-dayoff-toggle active" : "cal-dayoff-toggle"}
+            disabled={savingKey !== null}
+            onClick={toggleDay}
+            type="button"
+          >
+            {savingKey === `day:${selectedDate}` ? <Loader2 className="spin" size={14} /> : <Check size={14} />}
+            {isDayUnavailable ? "Day marked off" : "Mark full day off"}
+          </button>
+
+          <div className={isDayUnavailable ? "cal-slots disabled" : "cal-slots"}>
+            {timeSlots.map((slot) => {
+              const blocked = selectedDateBlocks.some((block) => (
+                block.kind === "HOURS"
+                && block.startMinute !== null
+                && block.endMinute !== null
+                && block.startMinute < slot.end
+                && block.endMinute > slot.start
+              ));
+              const key = `slot:${selectedDate}:${slot.start}`;
+              return (
+                <button
+                  className={blocked ? "cal-slot blocked" : "cal-slot"}
+                  disabled={savingKey !== null || isDayUnavailable}
+                  key={slot.start}
+                  onClick={() => toggleSlot(slot.start, slot.end)}
+                  type="button"
+                >
+                  <span className="cal-slot-time">{minutesToLabel(slot.start)}</span>
+                  <span className="cal-slot-state">
+                    {savingKey === key ? "Saving" : blocked ? "Off" : "Open"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="cal-hint">Tap a date to close the full day or block individual times.</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1882,13 +2275,10 @@ function NurseAvailabilityModal({
   const [emirate, setEmirate] = useState(initial.emirate);
   const [startMinute, setStartMinute] = useState(initial.start_minute);
   const [endMinute, setEndMinute] = useState(initial.end_minute);
-  const [slotInterval, setSlotInterval] = useState(initial.slot_interval_minutes);
   const [busyBuffer, setBusyBuffer] = useState(initial.busy_buffer_minutes);
-  const [priority, setPriority] = useState(initial.priority);
   const [status, setStatus] = useState(initial.status || "ACTIVE");
   const [offDays, setOffDays] = useState<string[]>(initial.off_days ?? []);
   const [breaks, setBreaks] = useState(initial.breaks ?? []);
-  const [serviceAreas, setServiceAreas] = useState((initial.service_area_norms ?? []).join(", "));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1921,12 +2311,9 @@ function NurseAvailabilityModal({
       emirate,
       end_minute: endMinute,
       off_days: offDays,
-      priority,
-      service_area_norms: serviceAreas
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean),
-      slot_interval_minutes: slotInterval,
+      priority: initial.priority,
+      service_area_norms: initial.service_area_norms ?? [],
+      slot_interval_minutes: initial.slot_interval_minutes,
       start_minute: startMinute,
       status,
       vertical_id: verticalId,
@@ -1998,14 +2385,6 @@ function NurseAvailabilityModal({
             </select>
           </label>
           <label>
-            Slot interval
-            <select onChange={(event) => setSlotInterval(Number(event.target.value))} value={slotInterval}>
-              {[15, 30, 45, 60, 90, 120].map((value) => (
-                <option key={value} value={value}>{value} minutes</option>
-              ))}
-            </select>
-          </label>
-          <label>
             Busy buffer
             <select onChange={(event) => setBusyBuffer(Number(event.target.value))} value={busyBuffer}>
               {[0, 30, 45, 60, 90, 120, 180].map((value) => (
@@ -2014,28 +2393,11 @@ function NurseAvailabilityModal({
             </select>
           </label>
           <label>
-            Priority
-            <input
-              min={0}
-              onChange={(event) => setPriority(Number(event.target.value))}
-              type="number"
-              value={priority}
-            />
-          </label>
-          <label>
             Status
             <select onChange={(event) => setStatus(event.target.value)} value={status}>
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive</option>
             </select>
-          </label>
-          <label>
-            Service areas
-            <input
-              onChange={(event) => setServiceAreas(event.target.value)}
-              placeholder="All areas"
-              value={serviceAreas}
-            />
           </label>
         </div>
 
