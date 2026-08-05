@@ -1,6 +1,9 @@
+import { MARKETPLACE_CLERK_PUBLISHABLE_KEY } from "@/lib/clerk";
 import { clerkMiddleware } from "@clerk/nextjs/server";
 
-export default clerkMiddleware();
+export default clerkMiddleware({
+  publishableKey: MARKETPLACE_CLERK_PUBLISHABLE_KEY,
+});
 
 export const config = {
   matcher: [
