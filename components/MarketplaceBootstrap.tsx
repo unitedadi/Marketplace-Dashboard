@@ -1,6 +1,6 @@
 "use client";
 
-import { ClerkProvider, useOrganization, useOrganizationList, useUser } from "@clerk/nextjs";
+import { ClerkProvider, useAuth, useOrganization, useOrganizationList, useUser } from "@clerk/nextjs";
 import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MarketplaceDashboard } from "@/components/MarketplaceDashboard";
@@ -34,33 +34,39 @@ type AuthenticatedDashboardState = {
   error: string | null;
 };
 
+type GetAuthToken = () => Promise<string | null>;
+
 function withAccount(path: string, accountId: string) {
   const sep = path.includes("?") ? "&" : "?";
   return `${path}${sep}account_id=${encodeURIComponent(accountId)}`;
 }
 
-async function proxyJson<T>(path: string, accountId?: string): Promise<T> {
+async function proxyJson<T>(path: string, accountId?: string, getAuthToken?: GetAuthToken): Promise<T> {
   const target = accountId ? withAccount(path, accountId) : path;
-  const response = await fetch(`/api/marketplace/${target}`, { cache: "no-store" });
+  const token = await getAuthToken?.();
+  const response = await fetch(`/api/marketplace/${target}`, {
+    cache: "no-store",
+    headers: token ? { authorization: `Bearer ${token}` } : undefined,
+  });
   if (!response.ok) throw new Error(await response.text());
   return response.json() as Promise<T>;
 }
 
-async function resolveAccounts(email: string): Promise<MarketplaceAccount[]> {
+async function resolveAccounts(email: string, getAuthToken?: GetAuthToken): Promise<MarketplaceAccount[]> {
   const encoded = encodeURIComponent(email);
-  const data = await proxyJson<{ items?: MarketplaceAccount[] }>(`auth/accounts?email=${encoded}`);
+  const data = await proxyJson<{ items?: MarketplaceAccount[] }>(`auth/accounts?email=${encoded}`, undefined, getAuthToken);
   return data.items ?? [];
 }
 
-async function loadDashboard(accountId: string): Promise<DashboardData> {
-  const context = await proxyJson<DashboardData["context"]>("context", accountId);
+async function loadDashboard(accountId: string, getAuthToken?: GetAuthToken): Promise<DashboardData> {
+  const context = await proxyJson<DashboardData["context"]>("context", accountId, getAuthToken);
   const caps = context.capabilities ?? {};
   const emptyBookings: BookingsResponse = { account: context.account, items: [], total: 0, limit: 100 };
 
   const [bookingsNew, bookingsCompleted, ledger, nurses, availability] = await Promise.all([
-    proxyJson<BookingsResponse>("bookings?limit=100&view=new", accountId).catch(() => emptyBookings),
-    proxyJson<BookingsResponse>("bookings?limit=100&view=completed", accountId).catch(() => emptyBookings),
-    proxyJson<DashboardData["ledger"]>("ledger?limit=500", accountId).catch(() => ({
+    proxyJson<BookingsResponse>("bookings?limit=100&view=new", accountId, getAuthToken).catch(() => emptyBookings),
+    proxyJson<BookingsResponse>("bookings?limit=100&view=completed", accountId, getAuthToken).catch(() => emptyBookings),
+    proxyJson<DashboardData["ledger"]>("ledger?limit=500", accountId, getAuthToken).catch(() => ({
       account: context.account,
       totals: {},
       total_amount_fils: 0,
@@ -68,13 +74,13 @@ async function loadDashboard(accountId: string): Promise<DashboardData> {
       limit: 500,
     })),
     caps.nurses
-      ? proxyJson<DashboardData["nurses"]>("nurses", accountId).catch(() => ({
+      ? proxyJson<DashboardData["nurses"]>("nurses", accountId, getAuthToken).catch(() => ({
           account: context.account,
           items: [],
         }))
       : Promise.resolve({ account: context.account, items: [] }),
     caps.availability
-      ? proxyJson<DashboardData["availability"]>("availability", accountId).catch(() => ({
+      ? proxyJson<DashboardData["availability"]>("availability", accountId, getAuthToken).catch(() => ({
           account: context.account,
           items: [],
         }))
@@ -134,6 +140,7 @@ function AuthenticatedMarketplaceBootstrap({ initialView }: Pick<BootstrapProps,
 }
 
 function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapProps, "initialView">) {
+  const { getToken } = useAuth();
   const { isLoaded, isSignedIn, user } = useUser();
   const { organization } = useOrganization();
   const { isLoaded: organizationListLoaded, setActive, userMemberships } = useOrganizationList({ userMemberships: true });
@@ -175,7 +182,7 @@ function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapP
     if (!isLoaded || !isSignedIn || !email || !activeOrganizationId) return;
 
     let cancelled = false;
-    resolveAccounts(email)
+    resolveAccounts(email, getToken)
       .then((items) => {
         if (cancelled) return;
         setAccountState({ accounts: items, error: null, orgId: activeOrganizationId, resolved: true });
@@ -198,12 +205,12 @@ function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapP
     return () => {
       cancelled = true;
     };
-  }, [activeOrganizationId, email, isLoaded, isSignedIn, selectedAccountId]);
+  }, [activeOrganizationId, email, getToken, isLoaded, isSignedIn, selectedAccountId]);
 
   useEffect(() => {
     if (!selectedAccountId) return;
     let cancelled = false;
-    loadDashboard(selectedAccountId)
+    loadDashboard(selectedAccountId, getToken)
       .then((next) => {
         if (!cancelled) setDashboardState({ accountId: selectedAccountId, data: next, error: null });
       })
@@ -219,7 +226,7 @@ function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapP
     return () => {
       cancelled = true;
     };
-  }, [selectedAccountId]);
+  }, [getToken, selectedAccountId]);
 
   if (!isLoaded) return <SpinnerOnly />;
 

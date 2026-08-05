@@ -1,5 +1,5 @@
 import { MARKETPLACE_ACCOUNT_ID, MARKETPLACE_API_BASE } from "@/lib/marketplace";
-import { getAuth } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 import { NextRequest } from "next/server";
 
 type RouteContext = {
@@ -21,10 +21,15 @@ async function proxyMarketplaceRequest(request: NextRequest, context: RouteConte
   const headers = new Headers();
   const contentType = request.headers.get("content-type");
   const filename = request.headers.get("x-filename");
-  const token = await getAuth(request).getToken();
+  const requestAuthorization = request.headers.get("authorization");
+  const token = requestAuthorization ? null : await (await auth()).getToken();
   if (contentType) headers.set("content-type", contentType);
   if (filename) headers.set("x-filename", filename);
-  if (token) headers.set("authorization", `Bearer ${token}`);
+  if (requestAuthorization) {
+    headers.set("authorization", requestAuthorization);
+  } else if (token) {
+    headers.set("authorization", `Bearer ${token}`);
+  }
 
   const hasBody = !["GET", "HEAD"].includes(request.method);
   const response = await fetch(upstream, {
@@ -37,6 +42,7 @@ async function proxyMarketplaceRequest(request: NextRequest, context: RouteConte
   return new Response(response.body, {
     headers: {
       "content-type": response.headers.get("content-type") ?? "application/json",
+      "x-marketplace-proxy-auth": requestAuthorization ? "request" : token ? "session" : "missing",
     },
     status: response.status,
     statusText: response.statusText,
