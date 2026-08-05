@@ -1,8 +1,8 @@
 "use client";
 
-import { ClerkProvider, useUser } from "@clerk/nextjs";
+import { ClerkProvider, useOrganization, useOrganizationList, useUser } from "@clerk/nextjs";
 import { Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MarketplaceDashboard } from "@/components/MarketplaceDashboard";
 import {
   BookingsResponse,
@@ -14,6 +14,24 @@ import {
 type BootstrapProps = {
   accountId?: string;
   initialView?: string;
+};
+
+type AccountDashboardState = {
+  accountId: string;
+  data: DashboardData | null;
+};
+
+type AccountResolutionState = {
+  accounts: MarketplaceAccount[];
+  error: string | null;
+  orgId: string | null;
+  resolved: boolean;
+};
+
+type AuthenticatedDashboardState = {
+  accountId: string | null;
+  data: DashboardData | null;
+  error: string | null;
 };
 
 function withAccount(path: string, accountId: string) {
@@ -84,25 +102,25 @@ export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps)
 }
 
 function AccountDashboard({ accountId, initialView }: { accountId: string; initialView?: string }) {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [state, setState] = useState<AccountDashboardState>({ accountId, data: null });
 
   useEffect(() => {
     let cancelled = false;
-    setData(null);
     loadDashboard(accountId)
       .then((next) => {
-        if (!cancelled) setData(next);
+        if (!cancelled) setState({ accountId, data: next });
       })
       .catch((err) => {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : "Failed to load marketplace dashboard.";
-        setData(emptyDashboardData(message, accountId));
+        setState({ accountId, data: emptyDashboardData(message, accountId) });
       });
     return () => {
       cancelled = true;
     };
   }, [accountId]);
 
+  const data = state.accountId === accountId ? state.data : null;
   if (!data) return <SpinnerOnly />;
   return <MarketplaceDashboard initialData={data} initialView={initialView} showUserButton={false} />;
 }
@@ -117,51 +135,86 @@ function AuthenticatedMarketplaceBootstrap({ initialView }: Pick<BootstrapProps,
 
 function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapProps, "initialView">) {
   const { isLoaded, isSignedIn, user } = useUser();
+  const { organization } = useOrganization();
+  const { isLoaded: organizationListLoaded, setActive, userMemberships } = useOrganizationList({ userMemberships: true });
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
-  const [accounts, setAccounts] = useState<MarketplaceAccount[]>([]);
-  const [accountsResolved, setAccountsResolved] = useState(false);
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [accountState, setAccountState] = useState<AccountResolutionState>({
+    accounts: [],
+    error: null,
+    orgId: null,
+    resolved: false,
+  });
+  const [dashboardState, setDashboardState] = useState<AuthenticatedDashboardState>({
+    accountId: null,
+    data: null,
+    error: null,
+  });
+  const activationAttemptedRef = useRef<string | null>(null);
   const email = useMemo(() => user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? null, [user]);
+  const membershipsData = userMemberships.data;
+  const memberships = useMemo(() => membershipsData ?? [], [membershipsData]);
+  const activeOrganizationId = organization?.id ?? null;
+  const accounts = accountState.orgId === activeOrganizationId ? accountState.accounts : [];
+  const accountsResolved = accountState.orgId === activeOrganizationId && accountState.resolved;
+  const accountError = accountState.orgId === activeOrganizationId ? accountState.error : null;
+  const data = dashboardState.accountId === selectedAccountId ? dashboardState.data : null;
+  const dashboardError = dashboardState.accountId === selectedAccountId ? dashboardState.error : null;
+  const error = dashboardError ?? accountError;
 
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || !email) return;
+    if (!isLoaded || !isSignedIn || !organizationListLoaded || activeOrganizationId || memberships.length !== 1) return;
+
+    const organizationId = memberships[0]?.organization.id;
+    if (!organizationId || activationAttemptedRef.current === organizationId) return;
+
+    activationAttemptedRef.current = organizationId;
+    void setActive({ organization: organizationId });
+  }, [activeOrganizationId, isLoaded, isSignedIn, memberships, organizationListLoaded, setActive]);
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || !email || !activeOrganizationId) return;
 
     let cancelled = false;
-    setAccountsResolved(false);
-    setError(null);
     resolveAccounts(email)
       .then((items) => {
         if (cancelled) return;
-        setAccounts(items);
-        setAccountsResolved(true);
-        if (items.length === 1) setSelectedAccountId(items[0].account_id);
+        setAccountState({ accounts: items, error: null, orgId: activeOrganizationId, resolved: true });
+        if (items.length === 1) {
+          setSelectedAccountId(items[0].account_id);
+        } else if (!items.some((item) => item.account_id === selectedAccountId)) {
+          setSelectedAccountId(null);
+        }
       })
       .catch((err) => {
         if (!cancelled) {
-          setAccountsResolved(true);
-          setError(err instanceof Error ? err.message : "Could not resolve marketplace account.");
+          setAccountState({
+            accounts: [],
+            error: err instanceof Error ? err.message : "Could not resolve marketplace account.",
+            orgId: activeOrganizationId,
+            resolved: true,
+          });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [email, isLoaded, isSignedIn]);
+  }, [activeOrganizationId, email, isLoaded, isSignedIn, selectedAccountId]);
 
   useEffect(() => {
     if (!selectedAccountId) return;
     let cancelled = false;
-    setError(null);
-    setData(null);
     loadDashboard(selectedAccountId)
       .then((next) => {
-        if (!cancelled) setData(next);
+        if (!cancelled) setDashboardState({ accountId: selectedAccountId, data: next, error: null });
       })
       .catch((err) => {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : "Failed to load marketplace dashboard.";
-        setData(emptyDashboardData(message, selectedAccountId));
-        setError(message);
+        setDashboardState({
+          accountId: selectedAccountId,
+          data: emptyDashboardData(message, selectedAccountId),
+          error: message,
+        });
       });
     return () => {
       cancelled = true;
@@ -177,6 +230,42 @@ function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapP
         body="Sign in with your marketplace email, or open a debug URL with an account_id."
         actionHref="/sign-in"
         actionLabel="Sign in"
+      />
+    );
+  }
+
+  if (!organizationListLoaded || (!activeOrganizationId && memberships.length === 1)) return <SpinnerOnly />;
+
+  if (!activeOrganizationId && memberships.length > 1) {
+    return (
+      <div className="auth-shell">
+        <div className="chooser-card">
+          <div className="eyebrow">Choose organization</div>
+          <h2>Select a workspace</h2>
+          <p>Your login has access to more than one organization.</p>
+          <div className="chooser-list">
+            {memberships.map((membership) => (
+              <button
+                className="chooser-item"
+                key={membership.id}
+                onClick={() => void setActive({ organization: membership.organization.id })}
+                type="button"
+              >
+                <span className="chooser-item-name">{membership.organization.name}</span>
+                <span className="chooser-item-id">{membership.organization.id}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!activeOrganizationId) {
+    return (
+      <StatusCard
+        title="No marketplace account"
+        body={email ? `${email} is not linked to a marketplace organization yet.` : "This login is not linked to a marketplace organization yet."}
       />
     );
   }

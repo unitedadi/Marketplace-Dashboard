@@ -712,6 +712,7 @@ function BookingDetail({
   const [selectedNurse, setSelectedNurse] = useState(booking.nurse_assignment?.nurse_id ?? "");
   const [isAssigning, setIsAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+  const [openedAt] = useState(() => Date.now());
 
   const customer = booking.customer.name || "Unnamed customer";
   const stage = booking.fulfillment_stage ?? booking.status;
@@ -720,7 +721,7 @@ function BookingDetail({
   const isCompleted = (stage ?? "").toUpperCase() === "COMPLETED";
   const startAt = booking.schedule.start_at;
   const startTime = startAt ? new Date(startAt).getTime() : NaN;
-  const isPast = Number.isFinite(startTime) && startTime <= Date.now();
+  const isPast = Number.isFinite(startTime) && startTime <= openedAt;
   const acknowledgement = booking.acknowledgement;
   const assignment = booking.nurse_assignment;
 
@@ -2269,7 +2270,10 @@ function NotificationsView({ accountId, parties }: { accountId: string; parties:
   }
 
   useEffect(() => {
-    load();
+    const timeout = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId]);
 
@@ -2522,7 +2526,10 @@ function TeamView({ accountId, currentEmail }: { accountId: string; currentEmail
   }
 
   useEffect(() => {
-    load();
+    const timeout = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId]);
 

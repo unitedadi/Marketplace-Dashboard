@@ -119,9 +119,12 @@ button {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  width: 100%;
   border: 1px solid var(--dd-divider);
   border-radius: 12px;
+  background: transparent;
   padding: 14px 16px;
+  text-align: left;
   transition:
     background var(--dd-snappy),
     border-color var(--dd-snappy);
