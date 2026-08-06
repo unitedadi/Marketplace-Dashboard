@@ -1011,6 +1011,62 @@ button:disabled {
   text-align: right;
 }
 
+.availability-section-toolbar {
+  padding-top: 12px;
+}
+
+.resource-row {
+  align-items: flex-start;
+  min-height: 78px;
+  padding: 14px 12px 14px 8px;
+}
+
+.resource-row .booking-row-title {
+  font-size: 15px;
+  font-weight: 350;
+  line-height: 1.25;
+}
+
+.resource-row .booking-row-subtitle {
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.resource-row .booking-meta-item {
+  font-size: 10px;
+}
+
+.resource-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--dd-divider);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dd-accent);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0 12px;
+  transition:
+    background var(--dd-snappy),
+    border-color var(--dd-snappy);
+}
+
+.mode-toggle-button:hover {
+  border-color: rgba(23, 59, 61, 0.16);
+  background: var(--dd-fill-subtle);
+}
+
 .ack-pill-button {
   display: inline-flex;
   align-items: center;
@@ -2263,6 +2319,11 @@ label {
     align-items: center;
     gap: 12px;
     text-align: left;
+  }
+
+  .resource-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .table-row {

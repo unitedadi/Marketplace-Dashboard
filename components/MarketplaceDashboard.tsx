@@ -1808,6 +1808,20 @@ function calendarCollectorOptions(availabilityRows: AvailabilityRow[], parties: 
   return Array.from(options.values());
 }
 
+function verticalDisplayName(verticalId: string) {
+  if (verticalId === "iv-drips") return "IV Drips";
+  if (verticalId === "laboratory") return "Laboratory";
+  return verticalId;
+}
+
+function emirateDisplayName(emirate: string | null | undefined) {
+  return EMIRATE_OPTIONS.find((option) => option.value === emirate)?.label ?? emirate ?? "All emirates";
+}
+
+function resourceModeKey(row: AvailabilityRow) {
+  return `${row.vertical_id}:${row.collector_id}:${row.emirate}`;
+}
+
 function AvailabilityView({
   accountId,
   availabilityRows,
@@ -1823,17 +1837,70 @@ function AvailabilityView({
 }) {
   const [editNurseId, setEditNurseId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [modeSavingKey, setModeSavingKey] = useState<string | null>(null);
+  const [modeError, setModeError] = useState<string | null>(null);
   const editNurse = nurses.find((nurse) => nurse.nurse_id === editNurseId) ?? null;
+  const resourceRows = useMemo(
+    () => availabilityRows.filter((row) => row.collector_id && row.vertical_id && row.emirate),
+    [availabilityRows],
+  );
   const collectorOptions = useMemo(
     () => calendarCollectorOptions(availabilityRows, parties),
     [availabilityRows, parties],
   );
 
+  async function toggleTimeslotMode(row: AvailabilityRow) {
+    const key = resourceModeKey(row);
+    const nextMode = row.timeslot_mode === "NURSE" ? "LEGACY" : "NURSE";
+    setModeSavingKey(key);
+    setModeError(null);
+    try {
+      await proxyJson("availability/resource-mode", accountId, {
+        body: JSON.stringify({
+          emirate: row.emirate,
+          mode: nextMode,
+          party_id: row.collector_id,
+          vertical_id: row.vertical_id,
+        }),
+        method: "PATCH",
+      });
+      await onChanged();
+    } catch (err) {
+      setModeError(friendlyAckError(err));
+    } finally {
+      setModeSavingKey(null);
+    }
+  }
+
   return (
     <div className="view-stack">
       <div className="list-toolbar">
         <div className="list-header">
-          <span className="list-header-label">Nurse availability</span>
+          <span className="list-header-label">Coverage</span>
+          <span className="list-header-count">{resourceRows.length}</span>
+        </div>
+      </div>
+
+      {modeError ? <div className="notice bad notice--inline">{modeError}</div> : null}
+
+      {resourceRows.length === 0 ? (
+        <EmptyState title="No active coverage" body="Active Lab or IV coverage is required before slots can be managed." />
+      ) : (
+        <div className="booking-list" aria-label="Coverage resources">
+          {resourceRows.map((row) => (
+            <TimeslotResourceRow
+              isSaving={modeSavingKey === resourceModeKey(row)}
+              key={resourceModeKey(row)}
+              onToggle={() => toggleTimeslotMode(row)}
+              row={row}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="list-toolbar availability-section-toolbar">
+        <div className="list-header">
+          <span className="list-header-label">Nurses</span>
           <span className="list-header-count">{nurses.length}</span>
         </div>
         <button className="icon-action" onClick={() => setShowCreate(true)} type="button">
@@ -1869,6 +1936,58 @@ function AvailabilityView({
       ) : null}
 
       <CollectorAvailabilityCalendar accountId={accountId} collectorOptions={collectorOptions} />
+    </div>
+  );
+}
+
+function TimeslotResourceRow({
+  isSaving,
+  onToggle,
+  row,
+}: {
+  isSaving: boolean;
+  onToggle: () => void;
+  row: AvailabilityRow;
+}) {
+  const mode = row.timeslot_mode === "NURSE" ? "NURSE" : "LEGACY";
+  const nextLabel = mode === "NURSE" ? "Use legacy" : "Use nurses";
+  const scheduleCount = Number(row.active_nurse_schedule_count ?? 0);
+  const timeWindow = `${minutesToLabel(row.start_minute)}-${minutesToLabel(row.end_minute)}`;
+  const meta = [
+    verticalDisplayName(row.vertical_id),
+    emirateDisplayName(row.emirate),
+    timeWindow,
+    `${scheduleCount} nurse schedule${scheduleCount === 1 ? "" : "s"}`,
+  ];
+
+  return (
+    <div className="booking-row static resource-row">
+      <div className="booking-row-copy">
+        <div className="booking-row-titleline">
+          <span className="booking-row-title">{row.collector_name || row.collector_id}</span>
+          <span className="booking-id-pill">{row.collector_id}</span>
+        </div>
+        <div className="booking-row-subtitle">
+          {mode === "NURSE" ? "Nurse schedules drive public slots" : "Legacy schedule drives public slots"}
+        </div>
+        <div className="booking-row-meta">
+          {meta.map((item, index) => (
+            <span className="booking-meta-item" key={`${row.collector_id}-${item}`}>
+              {index > 0 ? <span className="booking-meta-dot" aria-hidden="true">·</span> : null}
+              {item}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="resource-actions">
+        <span className={`status-pill ${mode === "NURSE" ? "good" : "neutral"}`}>
+          {mode === "NURSE" ? "Nurse mode" : "Legacy mode"}
+        </span>
+        <button className="mode-toggle-button" disabled={isSaving} onClick={onToggle} type="button">
+          {isSaving ? <Loader2 className="spin" size={14} /> : <Check size={14} />}
+          {nextLabel}
+        </button>
+      </div>
     </div>
   );
 }

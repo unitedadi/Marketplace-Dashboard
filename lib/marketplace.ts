@@ -183,6 +183,8 @@ export type AvailabilityRow = {
   slot_interval_minutes: number;
   busy_buffer_minutes: number;
   status: string;
+  timeslot_mode?: "LEGACY" | "NURSE";
+  active_nurse_schedule_count?: number;
   breaks: Array<{
     collector_break_id?: number;
     start_minute: number;
