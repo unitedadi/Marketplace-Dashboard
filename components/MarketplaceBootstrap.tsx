@@ -14,6 +14,7 @@ import {
 
 type BootstrapProps = {
   accountId?: string;
+  apiBase: string;
   initialView?: string;
 };
 
@@ -121,19 +122,19 @@ async function loadDashboard(
   };
 }
 
-export function MarketplaceBootstrap({ accountId, initialView }: BootstrapProps) {
+export function MarketplaceBootstrap({ accountId, apiBase, initialView }: BootstrapProps) {
   return (
     <ClerkProvider {...MARKETPLACE_CLERK_PROVIDER_PROPS}>
       {accountId ? (
-        <AccountDashboard accountId={accountId} initialView={initialView} />
+        <AccountDashboard accountId={accountId} apiBase={apiBase} initialView={initialView} />
       ) : (
-        <AuthenticatedMarketplaceBootstrapInner initialView={initialView} />
+        <AuthenticatedMarketplaceBootstrapInner apiBase={apiBase} initialView={initialView} />
       )}
     </ClerkProvider>
   );
 }
 
-function AccountDashboard({ accountId, initialView }: { accountId: string; initialView?: string }) {
+function AccountDashboard({ accountId, apiBase, initialView }: BootstrapProps & { accountId: string }) {
   const { getToken } = useAuth();
   const { isLoaded, isSignedIn } = useUser();
   const { organization } = useOrganization();
@@ -192,10 +193,10 @@ function AccountDashboard({ accountId, initialView }: { accountId: string; initi
 
   const data = state.accountId === accountId ? state.data : null;
   if (!data) return <SpinnerOnly />;
-  return <MarketplaceDashboard initialData={data} initialView={initialView} showUserButton={false} />;
+  return <MarketplaceDashboard apiBase={apiBase} initialData={data} initialView={initialView} showUserButton={false} />;
 }
 
-function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapProps, "initialView">) {
+function AuthenticatedMarketplaceBootstrapInner({ apiBase, initialView }: Pick<BootstrapProps, "apiBase" | "initialView">) {
   const { getToken } = useAuth();
   const { isLoaded, isSignedIn, user } = useUser();
   const { organization } = useOrganization();
@@ -366,7 +367,7 @@ function AuthenticatedMarketplaceBootstrapInner({ initialView }: Pick<BootstrapP
 
   if (!data) return <SpinnerOnly />;
 
-  return <MarketplaceDashboard initialData={data} initialView={initialView} key={selectedAccountId} showUserButton />;
+  return <MarketplaceDashboard apiBase={apiBase} initialData={data} initialView={initialView} key={selectedAccountId} showUserButton />;
 }
 
 function SpinnerOnly() {

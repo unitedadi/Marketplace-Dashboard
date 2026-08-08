@@ -1,4 +1,5 @@
 import { MarketplaceBootstrap } from "@/components/MarketplaceBootstrap";
+import { MARKETPLACE_API_BASE } from "@/lib/marketplace";
 
 export default async function Page({
   searchParams,
@@ -11,5 +12,5 @@ export default async function Page({
   const rawView = params.view;
   const initialView = Array.isArray(rawView) ? rawView[0] : rawView;
 
-  return <MarketplaceBootstrap accountId={accountId} initialView={initialView} />;
+  return <MarketplaceBootstrap accountId={accountId} apiBase={MARKETPLACE_API_BASE} initialView={initialView} />;
 }

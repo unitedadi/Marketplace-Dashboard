@@ -1,6 +1,6 @@
 "use client";
 
-import { UserButton } from "@clerk/nextjs";
+import { useAuth, useOrganization, UserButton } from "@clerk/nextjs";
 import {
   Banknote,
   Bell,
@@ -57,6 +57,8 @@ const navItems: Array<{ id: ViewId; label: string; icon: typeof CalendarCheck2 }
   { id: "team", label: "Team", icon: Users },
 ];
 
+const MAX_RESULT_PDF_BYTES = 25 * 1024 * 1024;
+
 function withAccount(path: string, accountId: string) {
   const sep = path.includes("?") ? "&" : "?";
   return `${path}${sep}account_id=${encodeURIComponent(accountId)}`;
@@ -79,19 +81,31 @@ async function uploadResultPdf(
   orderMemberId: number,
   file: File,
   accountId: string,
+  apiBase: string,
+  token: string,
 ) {
-  const response = await fetch(
-    `/api/marketplace/${withAccount(`bookings/${orderId}/members/${orderMemberId}/results/pdf`, accountId)}`,
-    {
-      body: file,
-      headers: {
-        "content-type": file.type || "application/pdf",
-        "x-filename": file.name,
-      },
-      method: "POST",
-    },
+  const url = new URL(
+    `/marketplace/bookings/${encodeURIComponent(orderId)}/members/${orderMemberId}/results/pdf`,
+    apiBase,
   );
-  if (!response.ok) throw new Error(await response.text());
+  url.searchParams.set("account_id", accountId);
+  url.searchParams.set("filename", file.name);
+
+  const response = await fetch(url, {
+    body: file,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/pdf",
+    },
+    method: "POST",
+  });
+  if (!response.ok) {
+    if (response.status === 413) {
+      throw new Error("This PDF is too large. The maximum file size is 25 MB.");
+    }
+    const payload = await response.json().catch(() => null) as { detail?: string; error?: string } | null;
+    throw new Error(payload?.detail || payload?.error || "The PDF could not be uploaded. Please try again.");
+  }
   return response.json();
 }
 
@@ -167,10 +181,12 @@ function isViewId(value: string | undefined): value is ViewId {
 }
 
 export function MarketplaceDashboard({
+  apiBase,
   initialData,
   initialView,
   showUserButton = false,
 }: {
+  apiBase: string;
   initialData: DashboardData;
   initialView?: string;
   showUserButton?: boolean;
@@ -344,6 +360,7 @@ export function MarketplaceDashboard({
         <BookingDetail
           accountId={accountId}
           actorEmail={data.context.account.owner_email}
+          apiBase={apiBase}
           booking={selectedBooking}
           canAssignNurses={canAssignNurses}
           nurses={data.nurses.items.filter((nurse) => (nurse.status ?? "").toUpperCase() === "ACTIVE")}
@@ -705,6 +722,7 @@ function MapCopyButton({ url }: { url: string }) {
 function BookingDetail({
   accountId,
   actorEmail,
+  apiBase,
   booking,
   canAssignNurses,
   nurses,
@@ -713,6 +731,7 @@ function BookingDetail({
 }: {
   accountId: string;
   actorEmail?: string | null;
+  apiBase: string;
   booking: MarketplaceBooking;
   canAssignNurses: boolean;
   nurses: MarketplaceNurse[];
@@ -972,6 +991,7 @@ function BookingDetail({
           {booking.members.map((member) => (
             <MemberUploadRow
               accountId={accountId}
+              apiBase={apiBase}
               booking={booking}
               canUpload={canUploadResults}
               isLab={isLab}
@@ -1018,6 +1038,7 @@ function BookingDetail({
 
 function MemberUploadRow({
   accountId,
+  apiBase,
   booking,
   canUpload,
   isLab,
@@ -1025,12 +1046,15 @@ function MemberUploadRow({
   onChanged,
 }: {
   accountId: string;
+  apiBase: string;
   booking: MarketplaceBooking;
   canUpload: boolean;
   isLab: boolean;
   member: BookingMember;
   onChanged: () => Promise<void>;
 }) {
+  const { getToken } = useAuth();
+  const { organization } = useOrganization();
   const inputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1078,10 +1102,17 @@ function MemberUploadRow({
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (file.size > MAX_RESULT_PDF_BYTES) {
+      setError("This PDF is too large. The maximum file size is 25 MB.");
+      event.target.value = "";
+      return;
+    }
     setIsUploading(true);
     setError(null);
     try {
-      await uploadResultPdf(booking.order_id, member.order_member_id, file, accountId);
+      const token = await getToken(organization?.id ? { organizationId: organization.id } : undefined);
+      if (!token) throw new Error("Your session expired. Please sign in again before uploading the PDF.");
+      await uploadResultPdf(booking.order_id, member.order_member_id, file, accountId, apiBase, token);
       await onChanged();
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
