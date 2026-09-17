@@ -340,7 +340,7 @@ export function MarketplaceDashboard({
               onSelect={setSelectedOrderId}
             />
           ) : null}
-          {safeView === "revenue" ? <RevenueView accountName={accountName} entries={data.ledger.items} /> : null}
+          {safeView === "revenue" ? <RevenueView accountId={accountId} accountName={accountName} entries={data.ledger.items} /> : null}
           {safeView === "nurses" ? <NursesView accountId={accountId} data={data} onChanged={refresh} /> : null}
           {safeView === "availability" ? (
             <AvailabilityView
@@ -1269,21 +1269,14 @@ function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-// Month grouping in Dubai time (UTC+4), consistent with formatDateTime.
-function dubaiMonthIndex(value: string | null): number | null {
-  if (!value) return null;
-  const time = new Date(value).getTime();
-  if (Number.isNaN(time)) return null;
-  const date = new Date(time + 4 * 60 * 60 * 1000);
-  return date.getUTCFullYear() * 12 + date.getUTCMonth();
-}
-
 function currentDubaiMonthIndex(): number {
   const date = new Date(Date.now() + 4 * 60 * 60 * 1000);
   return date.getUTCFullYear() * 12 + date.getUTCMonth();
 }
 
-function ledgerMatchesQuery(entry: LedgerEntry, query: string) {
+type LedgerDateField = "occurred_at" | "appointment_at";
+
+function ledgerMatchesQuery(entry: LedgerEntry, query: string, dateField: LedgerDateField) {
   const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!tokens.length) return true;
   const haystack = [
@@ -1293,7 +1286,7 @@ function ledgerMatchesQuery(entry: LedgerEntry, query: string) {
     entry.entry_type,
     entry.customer_name,
     entry.vertical_id,
-    formatDateTime(entry.occurred_at),
+    formatDateTime(entry[dateField] ?? null),
     formatMoney(entry.amount_fils),
   ]
     .filter(Boolean)
@@ -1307,7 +1300,7 @@ function csvCell(value: unknown): string {
   return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
-function exportLedgerCsv(entries: LedgerEntry[], fileLabel: string) {
+function exportLedgerCsv(entries: LedgerEntry[], fileLabel: string, dateField: LedgerDateField) {
   const headers = [
     "Order ID",
     "Customer",
@@ -1317,7 +1310,7 @@ function exportLedgerCsv(entries: LedgerEntry[], fileLabel: string) {
     "Vertical",
     "Type",
     "Amount (AED)",
-    "Occurred",
+    dateField === "appointment_at" ? "Appointment (Dubai)" : "Occurred",
   ];
   const rows = entries.map((entry) => [
     entry.order_id,
@@ -1328,7 +1321,7 @@ function exportLedgerCsv(entries: LedgerEntry[], fileLabel: string) {
     entry.vertical_id,
     entry.entry_type,
     (entry.amount_fils / 100).toFixed(2),
-    formatDateTime(entry.occurred_at),
+    formatDateTime(entry[dateField] ?? null),
   ]);
   const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
   // BOM so Excel reads UTF-8 correctly.
@@ -1345,24 +1338,66 @@ function exportLedgerCsv(entries: LedgerEntry[], fileLabel: string) {
 
 type RevenuePeriod = "all" | "last" | "current";
 
-function RevenueView({ accountName, entries }: { accountName: string; entries: LedgerEntry[] }) {
+function RevenueView({ accountId, accountName, entries }: { accountId: string; accountName: string; entries: LedgerEntry[] }) {
   const [period, setPeriod] = useState<RevenuePeriod>("all");
   const [query, setQuery] = useState("");
+  const [monthlyReport, setMonthlyReport] = useState<{
+    accountId: string;
+    month: string;
+    sourceEntries: LedgerEntry[];
+    data: DashboardData["ledger"] | null;
+    error: string | null;
+  } | null>(null);
 
-  // NOTE: month split is client-side for now; swap to the period APIs when provided.
   const currentMonth = currentDubaiMonthIndex();
   const targetMonth = period === "current" ? currentMonth : currentMonth - 1;
-  const inPeriod =
-    period === "all" ? entries : entries.filter((entry) => dubaiMonthIndex(entry.occurred_at) === targetMonth);
-  const visible = inPeriod.filter((entry) => ledgerMatchesQuery(entry, query));
+  const reportingMonth = period === "all"
+    ? null
+    : `${Math.floor(targetMonth / 12)}-${String(targetMonth % 12 + 1).padStart(2, "0")}`;
+
+  useEffect(() => {
+    if (!reportingMonth) return;
+    let cancelled = false;
+    const reportKey = { accountId, month: reportingMonth, sourceEntries: entries };
+    proxyJson<DashboardData["ledger"]>(
+      `ledger?view=monthly_commission&month=${reportingMonth}&limit=500`,
+      accountId,
+      { cache: "no-store" },
+    )
+      .then((data) => {
+        if (data.ledger_basis !== "completed_appointment_month" || data.reporting_month !== reportingMonth) {
+          throw new Error("Unexpected monthly report");
+        }
+        if (!cancelled) setMonthlyReport({ ...reportKey, data, error: null });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMonthlyReport({ ...reportKey, data: null, error: "Could not load monthly revenue. Please refresh to try again." });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [accountId, entries, reportingMonth]);
+
+  const report = monthlyReport?.accountId === accountId
+    && monthlyReport.month === reportingMonth
+    && monthlyReport.sourceEntries === entries
+    ? monthlyReport
+    : null;
+  const loading = Boolean(reportingMonth && !report);
+  const error = reportingMonth ? report?.error : null;
+  const dateField: LedgerDateField = reportingMonth ? "appointment_at" : "occurred_at";
+  const inPeriod = reportingMonth ? report?.data?.items ?? [] : entries;
+  const visible = inPeriod.filter((entry) => ledgerMatchesQuery(entry, query, dateField));
   const hasQuery = query.trim().length > 0;
   const periodLabel =
     period === "all" ? "all revenue" : period === "current" ? "the current month" : "last month";
 
-  const periodTotal = inPeriod.reduce((sum, entry) => sum + (entry.amount_fils || 0), 0);
+  const periodTotal = reportingMonth
+    ? report?.data?.total_amount_fils ?? 0
+    : inPeriod.reduce((sum, entry) => sum + (entry.amount_fils || 0), 0);
   const stats = [
-    { label: "Total", value: formatMoney(periodTotal) },
-    { label: "Entries", value: String(inPeriod.length) },
+    { label: "Total", value: loading || error ? "—" : formatMoney(periodTotal) },
+    { label: "Entries", value: loading || error ? "—" : String(inPeriod.length) },
   ];
 
   return (
@@ -1389,6 +1424,7 @@ function RevenueView({ accountName, entries }: { accountName: string; entries: L
             exportLedgerCsv(
               inPeriod,
               `revenue-${accountName.replace(/\s+/g, "-").toLowerCase()}-${period === "all" ? "all" : period === "current" ? "current-month" : "last-month"}`,
+              dateField,
             )
           }
           type="button"
@@ -1398,7 +1434,14 @@ function RevenueView({ accountName, entries }: { accountName: string; entries: L
         </button>
       </div>
       <MetricRow stats={stats} />
-      {visible.length === 0 ? (
+      <div className="booking-meta-item">
+        {reportingMonth ? "Completed appointments, by appointment date in Dubai." : "Ledger entries, by posting date in Dubai."}
+      </div>
+      {loading ? (
+        <div className="notice" role="status">Loading monthly revenue…</div>
+      ) : error ? (
+        <div className="notice bad" role="alert">{error}</div>
+      ) : visible.length === 0 ? (
         <EmptyState
           body={
             hasQuery
@@ -1418,7 +1461,7 @@ function RevenueView({ accountName, entries }: { accountName: string; entries: L
       ) : (
         <div className="booking-list" aria-label="Ledger entries">
           {visible.map((entry) => (
-            <LedgerRow entry={entry} key={entry.ledger_entry_id} />
+            <LedgerRow dateField={dateField} entry={entry} key={entry.ledger_entry_id} />
           ))}
         </div>
       )}
@@ -1426,7 +1469,7 @@ function RevenueView({ accountName, entries }: { accountName: string; entries: L
   );
 }
 
-function LedgerRow({ entry }: { entry: LedgerEntry }) {
+function LedgerRow({ entry, dateField }: { entry: LedgerEntry; dateField: LedgerDateField }) {
   const title = entry.customer_name || entry.party_name || entry.order_id;
   const meta = [
     entry.party_name,
@@ -1453,7 +1496,7 @@ function LedgerRow({ entry }: { entry: LedgerEntry }) {
       </div>
       <div className="booking-row-side">
         <span className="ledger-amount">{formatMoney(entry.amount_fils)}</span>
-        <span className="booking-row-time">{formatDateTime(entry.occurred_at)}</span>
+        <span className="booking-row-time">{formatDateTime(entry[dateField] ?? null)}</span>
       </div>
     </div>
   );
