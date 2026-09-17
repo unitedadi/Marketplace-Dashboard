@@ -130,6 +130,7 @@ export type LedgerEntry = {
   entry_type: string;
   amount_fils: number;
   occurred_at: string | null;
+  appointment_at?: string | null;
   customer_name: string | null;
   booking_status: string | null;
 };
@@ -252,6 +253,8 @@ export type DashboardData = {
   };
   ledger: {
     account: MarketplaceAccount;
+    ledger_basis?: "posted_ledger_entries" | "completed_appointment_month";
+    reporting_month?: string;
     totals: Record<string, number>;
     total_amount_fils: number;
     items: LedgerEntry[];
